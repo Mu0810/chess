@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kiro Chess</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">&#9812;</span>
+      <span class="brand-name">Kiro&nbsp;Chess</span>
+    </div>
+    <nav class="topnav">
+      <button class="nav-btn" id="btn-new-game">New Game</button>
+      <button class="nav-btn ghost" id="btn-settings">Settings</button>
+    </nav>
+  </header>
+
+  <main class="layout">
+    <!-- Board column -->
+    <section class="board-column">
+      <div class="player-bar" id="player-top">
+        <div class="player-id">
+          <span class="avatar" id="avatar-top">&#9823;</span>
+          <div class="player-meta">
+            <span class="player-name" id="name-top">Opponent</span>
+            <span class="captured" id="captured-top"></span>
+          </div>
+        </div>
+        <div class="clock" id="clock-top">10:00</div>
+      </div>
+
+      <div class="board-wrap">
+        <div class="board" id="board" aria-label="Chess board"></div>
+        <div class="board-overlay" id="board-overlay"></div>
+      </div>
+
+      <div class="player-bar" id="player-bottom">
+        <div class="player-id">
+          <span class="avatar" id="avatar-bottom">&#9817;</span>
+          <div class="player-meta">
+            <span class="player-name" id="name-bottom">You</span>
+            <span class="captured" id="captured-bottom"></span>
+          </div>
+        </div>
+        <div class="clock" id="clock-bottom">10:00</div>
+      </div>
+    </section>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="panel status-panel">
+        <div class="status-line" id="status-line">White to move</div>
+        <div class="eval-line" id="eval-line"></div>
+      </div>
+
+      <div class="panel moves-panel">
+        <div class="panel-title">Moves</div>
+        <div class="moves-scroll">
+          <table class="moves-table">
+            <tbody id="moves-body"></tbody>
+          </table>
+        </div>
+        <div class="nav-controls">
+          <button class="icon-btn" id="nav-first" title="First move">&#8676;</button>
+          <button class="icon-btn" id="nav-prev" title="Previous">&#8592;</button>
+          <button class="icon-btn" id="nav-next" title="Next">&#8594;</button>
+          <button class="icon-btn" id="nav-last" title="Latest">&#8677;</button>
+        </div>
+      </div>
+
+      <div class="panel action-panel">
+        <button class="action-btn" id="btn-flip">Flip board</button>
+        <button class="action-btn" id="btn-takeback">Takeback</button>
+        <button class="action-btn" id="btn-draw">Offer draw</button>
+        <button class="action-btn danger" id="btn-resign">Resign</button>
+      </div>
+
+      <div class="panel io-panel">
+        <div class="panel-title">Import / Export</div>
+        <div class="io-row">
+          <button class="mini-btn" id="btn-copy-pgn">Copy PGN</button>
+          <button class="mini-btn" id="btn-copy-fen">Copy FEN</button>
+        </div>
+        <textarea id="io-text" class="io-text" placeholder="Paste FEN or PGN here, then Load"></textarea>
+        <div class="io-row">
+          <button class="mini-btn" id="btn-load-fen">Load FEN</button>
+          <button class="mini-btn" id="btn-load-pgn">Load PGN</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- New Game dialog -->
+  <div class="modal-backdrop hidden" id="newgame-modal">
+    <div class="modal">
+      <h2 class="modal-title">New Game</h2>
+
+      <div class="form-group">
+        <label class="form-label">Mode</label>
+        <div class="segmented" id="opt-mode">
+          <button class="seg" data-value="ai">vs Computer</button>
+          <button class="seg active" data-value="human">Two Players</button>
+        </div>
+      </div>
+
+      <div class="form-group" id="group-difficulty">
+        <label class="form-label">Computer strength</label>
+        <div class="segmented" id="opt-difficulty">
+          <button class="seg" data-value="1">Easy</button>
+          <button class="seg active" data-value="2">Medium</button>
+          <button class="seg" data-value="3">Hard</button>
+          <button class="seg" data-value="4">Max</button>
+        </div>
+      </div>
+
+      <div class="form-group" id="group-color">
+        <label class="form-label">Play as</label>
+        <div class="segmented" id="opt-color">
+          <button class="seg active" data-value="w">White</button>
+          <button class="seg" data-value="b">Black</button>
+          <button class="seg" data-value="random">Random</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Time control</label>
+        <div class="segmented wrap" id="opt-time">
+          <button class="seg" data-value="60,0">Bullet 1+0</button>
+          <button class="seg" data-value="180,2">Blitz 3+2</button>
+          <button class="seg" data-value="300,0">Blitz 5+0</button>
+          <button class="seg active" data-value="600,0">Rapid 10+0</button>
+          <button class="seg" data-value="900,10">Rapid 15+10</button>
+          <button class="seg" data-value="0,0">Unlimited</button>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-secondary" id="newgame-cancel">Cancel</button>
+        <button class="btn-primary" id="newgame-start">Start game</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings dialog -->
+  <div class="modal-backdrop hidden" id="settings-modal">
+    <div class="modal">
+      <h2 class="modal-title">Settings</h2>
+
+      <div class="form-group">
+        <label class="form-label">Board theme</label>
+        <div class="segmented wrap" id="opt-theme">
+          <button class="seg active" data-value="green">Green</button>
+          <button class="seg" data-value="brown">Brown</button>
+          <button class="seg" data-value="blue">Blue</button>
+          <button class="seg" data-value="gray">Gray</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Sound</label>
+        <div class="segmented" id="opt-sound">
+          <button class="seg active" data-value="on">On</button>
+          <button class="seg" data-value="off">Off</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Show legal moves</label>
+        <div class="segmented" id="opt-hints">
+          <button class="seg active" data-value="on">On</button>
+          <button class="seg" data-value="off">Off</button>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-primary" id="settings-close">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Promotion picker -->
+  <div class="promo-backdrop hidden" id="promo-modal">
+    <div class="promo-box" id="promo-box"></div>
+  </div>
+
+  <!-- Game over dialog -->
+  <div class="modal-backdrop hidden" id="gameover-modal">
+    <div class="modal small">
+      <div class="gameover-result" id="gameover-result">Checkmate</div>
+      <div class="gameover-detail" id="gameover-detail">White wins</div>
+      <div class="modal-actions center">
+        <button class="btn-primary" id="gameover-newgame">New Game</button>
+        <button class="btn-secondary" id="gameover-review">Review</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- toast -->
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="js/pieces.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/sounds.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
