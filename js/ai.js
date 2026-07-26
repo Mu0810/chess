@@ -241,4 +241,4 @@
   };
 
   global.ChessAI = ChessAI;
-})(typeof window !== 'undefined' ? window : global);
+})(globalThis);

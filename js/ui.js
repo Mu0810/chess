@@ -43,10 +43,24 @@
   B._buildLayers = function () {
     this.boardEl.innerHTML = '';
     this.boardEl.classList.add('board-root');
+
+    // The squares layer is the accessible grid and the keyboard focus target.
+    // Pieces are drawn in a separate layer that screen readers ignore, because
+    // each square already announces the piece standing on it.
     this.squaresEl = document.createElement('div');
     this.squaresEl.className = 'squares-layer';
+    this.squaresEl.id = 'board-grid';
+    this.squaresEl.setAttribute('role', 'grid');
+    this.squaresEl.setAttribute('tabindex', '0');
+    this.squaresEl.setAttribute('aria-label',
+      'Chess board. Use the arrow keys to move around, Enter to pick up and place a piece, and Escape to cancel.');
+    this.squaresEl.setAttribute('aria-rowcount', '8');
+    this.squaresEl.setAttribute('aria-colcount', '8');
+
     this.piecesEl = document.createElement('div');
     this.piecesEl.className = 'pieces-layer';
+    this.piecesEl.setAttribute('aria-hidden', 'true');
+
     this.boardEl.appendChild(this.squaresEl);
     this.boardEl.appendChild(this.piecesEl);
   };
@@ -58,28 +72,62 @@
   B._buildSquares = function () {
     this.squaresEl.innerHTML = '';
     this.cells = new Array(64);
-    for (var p = 0; p < 64; p++) {
-      var boardIdx = this._screenToBoard(p);
-      var cell = document.createElement('div');
-      cell.className = 'sq ' + squareColor(boardIdx);
-      cell.dataset.idx = boardIdx;
 
-      if (p % 8 === 0) {
-        var rl = document.createElement('span');
-        rl.className = 'coord rank';
-        rl.textContent = (8 - rankOf(boardIdx));
-        cell.appendChild(rl);
+    // Rows exist so the grid semantics are valid. They use display:contents so
+    // the squares remain direct items of the CSS grid.
+    for (var r = 0; r < 8; r++) {
+      var row = document.createElement('div');
+      row.className = 'sq-row';
+      row.setAttribute('role', 'row');
+      row.setAttribute('aria-rowindex', String(r + 1));
+
+      for (var c = 0; c < 8; c++) {
+        var p = r * 8 + c;
+        var boardIdx = this._screenToBoard(p);
+        var cell = document.createElement('div');
+        cell.className = 'sq ' + squareColor(boardIdx);
+        cell.dataset.idx = boardIdx;
+        cell.id = 'sq-' + Chess.toAlgebraic(boardIdx);
+        cell.setAttribute('role', 'gridcell');
+        cell.setAttribute('aria-colindex', String(c + 1));
+
+        if (c === 0) {
+          var rl = document.createElement('span');
+          rl.className = 'coord rank';
+          rl.setAttribute('aria-hidden', 'true');
+          rl.textContent = (8 - rankOf(boardIdx));
+          cell.appendChild(rl);
+        }
+        if (r === 7) {
+          var fl = document.createElement('span');
+          fl.className = 'coord file';
+          fl.setAttribute('aria-hidden', 'true');
+          fl.textContent = 'abcdefgh'.charAt(fileOf(boardIdx));
+          cell.appendChild(fl);
+        }
+        row.appendChild(cell);
+        this.cells[boardIdx] = cell;
       }
-      if (p >= 56) {
-        var fl = document.createElement('span');
-        fl.className = 'coord file';
-        fl.textContent = 'abcdefgh'.charAt(fileOf(boardIdx));
-        cell.appendChild(fl);
-      }
-      this.squaresEl.appendChild(cell);
-      this.cells[boardIdx] = cell;
+      this.squaresEl.appendChild(row);
     }
+
+    if (this.cursor != null) this._setCursor(this.cursor, { silent: true });
+    this._updateSquareLabels();
     this._renderHighlights();
+  };
+
+  /** Describe each square so a screen reader can read the position. */
+  B._updateSquareLabels = function () {
+    for (var i = 0; i < 64; i++) {
+      var cell = this.cells[i];
+      if (!cell) continue;
+      var piece = this.board[i];
+      var name = Chess.toAlgebraic(i);
+      var label = piece
+        ? name + ', ' + (piece.color === 'w' ? 'white ' : 'black ') + Pieces.NAME[piece.type]
+        : name + ', empty';
+      cell.setAttribute('aria-label', label);
+    }
   };
 
   /**
@@ -287,6 +335,7 @@
     if (animated) this._syncPieces();
     else this._renderPieces({ stagger: !!state.stagger });
 
+    this._updateSquareLabels();
     this._renderHighlights();
   };
 
@@ -354,10 +403,121 @@
     }
   };
 
+  // ---- Keyboard ------------------------------------------------------------
+
+  /** Screen position of a board square, honouring the current orientation. */
+  B._screenOf = function (idx) {
+    return this.orientation === 'w'
+      ? { row: rankOf(idx), col: fileOf(idx) }
+      : { row: 7 - rankOf(idx), col: 7 - fileOf(idx) };
+  };
+
+  B._idxAtScreen = function (row, col) {
+    var p = row * 8 + col;
+    return this._screenToBoard(p);
+  };
+
+  B._setCursor = function (idx, opts) {
+    opts = opts || {};
+    var previous = this.cursor;
+    this.cursor = idx;
+    if (previous != null && this.cells[previous]) this.cells[previous].classList.remove('cursor');
+    var cell = this.cells[idx];
+    if (!cell) return;
+    cell.classList.add('cursor');
+    this.squaresEl.setAttribute('aria-activedescendant', cell.id);
+    if (!opts.silent && this.hooks.announce) {
+      this.hooks.announce(cell.getAttribute('aria-label'));
+    }
+  };
+
+  /** Where the cursor starts when the board first receives focus. */
+  B._defaultCursor = function () {
+    for (var i = 0; i < 64; i++) {
+      var piece = this.board[i];
+      if (piece && piece.color === this.orientation && piece.type === 'k') return i;
+    }
+    return this.orientation === 'w' ? Chess.fromAlgebraic('e2') : Chess.fromAlgebraic('e7');
+  };
+
+  B._onKeyDown = function (e) {
+    var steps = {
+      ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1]
+    };
+
+    if (this.cursor == null) this._setCursor(this._defaultCursor(), { silent: true });
+
+    if (steps[e.key]) {
+      e.preventDefault();
+      var at = this._screenOf(this.cursor);
+      var row = Math.min(7, Math.max(0, at.row + steps[e.key][0]));
+      var col = Math.min(7, Math.max(0, at.col + steps[e.key][1]));
+      this._setCursor(this._idxAtScreen(row, col));
+      return;
+    }
+
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      this._activateCursor();
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      if (this.selected != null) {
+        e.preventDefault();
+        this._clearSelection();
+        if (this.hooks.announce) this.hooks.announce('Selection cleared.');
+      }
+      return;
+    }
+
+    if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      var pos = this._screenOf(this.cursor);
+      this._setCursor(this._idxAtScreen(pos.row, e.key === 'Home' ? 0 : 7));
+    }
+  };
+
+  /** Enter / Space: pick up a piece, or place the one already picked up. */
+  B._activateCursor = function () {
+    if (!this.enabled) {
+      if (this.hooks.announce) this.hooks.announce('The board is not accepting moves right now.');
+      return;
+    }
+    var idx = this.cursor;
+    if (idx == null) return;
+
+    if (this.selected != null && this._isLegalTarget(idx)) {
+      this._attempt(this.selected, idx);
+      return;
+    }
+    if (this.selected === idx) {
+      this._clearSelection();
+      if (this.hooks.announce) this.hooks.announce('Selection cleared.');
+      return;
+    }
+
+    var canSelect = this.hooks.canSelect ? this.hooks.canSelect(idx) : !!this.board[idx];
+    if (canSelect && this.board[idx]) {
+      this._select(idx);
+      if (this.hooks.announce) {
+        var moves = this.legal.length;
+        this.hooks.announce(this.cells[idx].getAttribute('aria-label') + ' selected, ' +
+          moves + (moves === 1 ? ' move' : ' moves') + ' available.');
+      }
+    } else if (this.hooks.announce) {
+      this.hooks.announce(this.board[idx] ? 'That piece cannot move now.' : 'That square is empty.');
+    }
+  };
+
   // ---- Input ---------------------------------------------------------------
 
   B._bindEvents = function () {
     var self = this;
+    this.squaresEl.addEventListener('keydown', function (e) { self._onKeyDown(e); });
+    this.squaresEl.addEventListener('focus', function () {
+      if (self.cursor == null) self._setCursor(self._defaultCursor(), { silent: true });
+    });
     this.boardEl.addEventListener('pointerdown', function (e) { self._onDown(e); });
     this.boardEl.addEventListener('pointermove', function (e) { self._onMove(e); });
     this.boardEl.addEventListener('pointerup', function (e) { self._onUp(e); });
@@ -381,6 +541,7 @@
     if (canSel && this.board[idx]) {
       if (this.selected === idx) { this._clearSelection(); return; }
       this._select(idx);
+      this._setCursor(idx, { silent: true });   // keep the keyboard cursor in step
       this.drag = { fromIdx: idx, startX: e.clientX, startY: e.clientY, active: false, el: this.pieceEls[idx] };
       try { this.boardEl.setPointerCapture(e.pointerId); } catch (err) { /* older browsers */ }
     } else {

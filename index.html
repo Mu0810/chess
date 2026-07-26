@@ -21,7 +21,10 @@
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <a class="skip-link" href="#board">Skip to the board</a>
+  <a class="skip-link" href="#board-grid">Skip to the board</a>
+
+  <!-- Screen-reader announcements for moves, check, and results -->
+  <div id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <!-- Ambient background (decorative only): one accent wash plus film grain -->
   <div class="ambient" aria-hidden="true">
@@ -63,7 +66,7 @@
       <div class="board-stage">
         <div class="board-glow" aria-hidden="true"></div>
         <div class="board-wrap" id="board-wrap">
-          <div class="board" id="board" tabindex="-1" aria-label="Chess board"></div>
+          <div class="board" id="board"></div>
           <div class="board-overlay" id="board-overlay"></div>
         </div>
       </div>

@@ -9,6 +9,9 @@
 
   var MATERIAL = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
+  var SAVE_KEY = 'kiro-chess-game';
+  var SAVE_VERSION = 1;
+
   function Game() {
     var self = this;
 
@@ -39,13 +42,21 @@
     this.boardUI = new BoardUI(document.getElementById('board'), {
       legalMoves: function (idx) { return self._legalMoves(idx); },
       canSelect: function (idx) { return self._canSelect(idx); },
-      onMove: function (from, to, promotion) { self._humanMove(from, to, promotion); }
+      onMove: function (from, to, promotion) { self._humanMove(from, to, promotion); },
+      announce: function (message) { self.announce(message); }
     });
 
     this._cacheDom();
     this._bindActions();
     this._clockInterval = global.setInterval(function () { self._tick(); }, 100);
+
+    // Pick up an unfinished game from a previous visit, if there is one.
+    var resumed = this._restore();
     this._renderAll();
+    if (resumed) {
+      this.toast('Resumed your last game.');
+      this._maybeAI();
+    }
   }
 
   var G = Game.prototype;
@@ -80,7 +91,8 @@
       confirmTitle: document.getElementById('confirm-title'),
       confirmDetail: document.getElementById('confirm-detail'),
       confirmOk: document.getElementById('confirm-ok'),
-      confirmCancel: document.getElementById('confirm-cancel')
+      confirmCancel: document.getElementById('confirm-cancel'),
+      srStatus: document.getElementById('sr-status')
     };
   };
 
@@ -136,6 +148,7 @@
       self.boardUI.flip();
       self._renderPlayerBars();
       self._renderClocks();
+      self._scheduleSave();
     });
     document.getElementById('btn-takeback').addEventListener('click', function () { self.takeback(); });
     document.getElementById('btn-draw').addEventListener('click', function () { self.offerDraw(); });
@@ -159,6 +172,132 @@
       self.el.gameoverModal.classList.add('hidden');
       document.getElementById('btn-new-game').click();
     });
+  };
+
+  // ---- Persistence ---------------------------------------------------------
+
+  /**
+   * Snapshot the game so a refresh does not lose it. Moves are stored as
+   * square indices rather than notation, so restoring never depends on the
+   * SAN parser.
+   */
+  G._snapshotForSave = function () {
+    var moves = this.engine.gameMoves.map(function (m) {
+      var entry = { f: m.from, t: m.to };
+      if (m.promotion) entry.p = m.promotion;
+      return entry;
+    });
+    return {
+      v: SAVE_VERSION,
+      startFen: this.startFen,
+      moves: moves,
+      config: {
+        mode: this.config.mode,
+        aiLevel: this.config.aiLevel,
+        humanColor: this.config.humanColor,
+        baseSeconds: this.config.baseSeconds,
+        increment: this.config.increment
+      },
+      clocks: { w: Math.round(this.clocks.w), b: Math.round(this.clocks.b) },
+      clockHistory: this.clockHistory.map(function (c) {
+        return { w: Math.round(c.w), b: Math.round(c.b) };
+      }),
+      viewIndex: this.viewIndex,
+      active: this.active,
+      result: this.result,
+      orientation: this.boardUI.orientation
+    };
+  };
+
+  G._writeSave = function () {
+    try {
+      global.localStorage.setItem(SAVE_KEY, JSON.stringify(this._snapshotForSave()));
+    } catch (err) {
+      // Storage can be unavailable or full; the game keeps working without it.
+      this.saveUnavailable = true;
+    }
+  };
+
+  /** Coalesce rapid changes into a single write. */
+  G._scheduleSave = function () {
+    var self = this;
+    if (this._saveTimer) global.clearTimeout(this._saveTimer);
+    this._saveTimer = global.setTimeout(function () {
+      self._saveTimer = null;
+      self._writeSave();
+    }, 120);
+  };
+
+  G._clearSave = function () {
+    try { global.localStorage.removeItem(SAVE_KEY); } catch (err) { /* nothing to do */ }
+  };
+
+  /**
+   * Rebuild a saved game. Moves are replayed straight through the engine so
+   * restoring is silent: no sounds, animations, or announcements.
+   * @returns {boolean} true when a game was restored.
+   */
+  G._restore = function () {
+    var raw;
+    try { raw = global.localStorage.getItem(SAVE_KEY); } catch (err) { return false; }
+    if (!raw) return false;
+
+    var data;
+    try { data = JSON.parse(raw); } catch (err) { this._clearSave(); return false; }
+    if (!data || data.v !== SAVE_VERSION || !Array.isArray(data.moves)) {
+      this._clearSave();
+      return false;
+    }
+    if (!data.moves.length) return false;   // nothing worth resuming
+
+    try {
+      var engine = new Chess(data.startFen || Chess.START_FEN);
+      var snapshots = [engine.fen()];
+      for (var i = 0; i < data.moves.length; i++) {
+        var entry = data.moves[i] || {};
+        var played = engine.move({ from: entry.f, to: entry.t, promotion: entry.p || undefined });
+        if (!played) throw new Error('saved move ' + (i + 1) + ' does not fit the position');
+        snapshots.push(played.fenAfter);
+      }
+
+      var saved = data.config || {};
+      this.config.mode = saved.mode === 'ai' ? 'ai' : 'human';
+      this.config.aiLevel = Math.max(1, Math.min(4, +saved.aiLevel || 2));
+      this.config.humanColor = saved.humanColor === 'b' ? 'b' : 'w';
+      this.config.baseSeconds = Math.max(0, +saved.baseSeconds || 0);
+      this.config.increment = Math.max(0, +saved.increment || 0);
+
+      this.engine = engine;
+      this.startFen = data.startFen || Chess.START_FEN;
+      this.snapshots = snapshots;
+      this.viewIndex = Math.max(0, Math.min(engine.gameMoves.length, +data.viewIndex || 0));
+
+      var ms = this.config.baseSeconds * 1000;
+      var savedClocks = data.clocks || {};
+      this.clocks = {
+        w: this.config.baseSeconds > 0 ? Math.max(0, +savedClocks.w || 0) : ms,
+        b: this.config.baseSeconds > 0 ? Math.max(0, +savedClocks.b || 0) : ms
+      };
+      var history = Array.isArray(data.clockHistory) ? data.clockHistory : [];
+      this.clockHistory = history.length === engine.gameMoves.length + 1
+        ? history.map(function (c) { return { w: +c.w || 0, b: +c.b || 0 }; })
+        : snapshots.map(function () { return { w: this.clocks.w, b: this.clocks.b }; }, this);
+
+      // The clock always resumes stopped: time should not tick away while the
+      // tab is closed. It restarts on the next move.
+      this.clockRunning = false;
+      this.lastTick = performance.now();
+
+      var over = engine.isGameOver();
+      this.result = over ? engine.status() : (data.result && data.result.over ? data.result : null);
+      this.active = !this.result;
+
+      this.boardUI.setOrientation(data.orientation === 'b' ? 'b' : 'w');
+      return true;
+    } catch (err) {
+      this._clearSave();
+      return false;
+    }
   };
 
   // ---- Starting / loading --------------------------------------------------
@@ -195,6 +334,8 @@
     this._clearCelebration();
     this.sounds.play('start');
     this._renderAll();
+    this._clearSave();          // a fresh game replaces any resumable one
+    this._scheduleSave();
     this._maybeAI();
   };
 
@@ -227,6 +368,7 @@
       this.result = this.active ? null : c.status();
       this._resetLoadedClocks();
       this._renderAll();
+      this._scheduleSave();
       this.toast('FEN loaded.');
       this._maybeAI();
     } catch (err) {
@@ -251,6 +393,7 @@
       this.result = this.active ? null : c.status();
       this._resetLoadedClocks();
       this._renderAll();
+      this._scheduleSave();
       this.toast('PGN loaded: ' + c.gameMoves.length + ' moves.');
       this._maybeAI();
     } catch (err) {
@@ -318,6 +461,7 @@
 
     var status = this.engine.status();
     this._playMoveSound(move, status);
+    this._announceMove(move, status);
     this._pendingMove = move;   // lets the board animate this exact move
     this._justMoved = true;
     this._renderAll();
@@ -326,6 +470,7 @@
       this.boardUI._transient(this.el.boardWrap, 'shock', 520);
     }
 
+    this._scheduleSave();
     if (status.over) this._finish(status);
     else this._maybeAI();
     return move;
@@ -342,15 +487,52 @@
 
   // ---- AI ------------------------------------------------------------------
 
+  var MIN_THINK_MS = 260;   // keeps fast replies from feeling abrupt
+
+  /**
+   * Create the search worker on first use. Workers cannot be constructed from
+   * a file:// document, so failure here is expected in that case and simply
+   * means the search runs on the main thread instead.
+   */
+  G._ensureWorker = function () {
+    if (this.worker || this.workerUnavailable) return this.worker;
+    if (typeof global.Worker !== 'function') {
+      this.workerUnavailable = true;
+      return null;
+    }
+    var self = this;
+    try {
+      this.worker = new global.Worker('js/worker.js');
+    } catch (err) {
+      this.workerUnavailable = true;
+      this.worker = null;
+      return null;
+    }
+    this.worker.onmessage = function (event) { self._onWorkerResult(event.data || {}); };
+    this.worker.onerror = function (event) {
+      if (event && event.preventDefault) event.preventDefault();
+      // Fall back permanently: a broken worker must not stall the game.
+      self.workerUnavailable = true;
+      if (self.worker) { self.worker.terminate(); self.worker = null; }
+      if (self.aiThinking) self._searchOnMainThread();
+    };
+    return this.worker;
+  };
+
+  /** Abandon any in-flight search. Bumping the id invalidates late replies. */
   G._cancelAI = function () {
     if (this.aiTimer) global.clearTimeout(this.aiTimer);
     this.aiTimer = null;
     this.aiThinking = false;
+    this.aiRequestId = (this.aiRequestId || 0) + 1;
+  };
+
+  G._aiShouldMove = function () {
+    return this.active && this.config.mode === 'ai' && this.engine.turn !== this.config.humanColor;
   };
 
   G._maybeAI = function () {
-    var self = this;
-    if (!this.active || this.config.mode !== 'ai' || this.engine.turn === this.config.humanColor) {
+    if (!this._aiShouldMove()) {
       this.aiThinking = false;
       this._renderStatus();
       this._updateBoardEnabled();
@@ -359,24 +541,77 @@
 
     this._cancelAI();
     this.aiThinking = true;
+    this.aiStartedAt = performance.now();
     this._renderStatus();
     this._updateBoardEnabled();
+
+    var worker = this._ensureWorker();
+    if (worker) {
+      worker.postMessage({
+        type: 'search',
+        id: this.aiRequestId,
+        fen: this.engine.fen(),
+        level: this.config.aiLevel
+      });
+    } else {
+      this._searchOnMainThread();
+    }
+  };
+
+  /** Fallback search. Deferred so the "thinking" state can paint first. */
+  G._searchOnMainThread = function () {
+    var self = this;
+    var id = this.aiRequestId;
+    if (this.aiTimer) global.clearTimeout(this.aiTimer);
     this.aiTimer = global.setTimeout(function () {
       self.aiTimer = null;
-      if (!self.active || self.engine.turn === self.config.humanColor) return;
-      var move;
+      if (id !== self.aiRequestId || !self._aiShouldMove()) return;
       try {
-        move = self.ai.chooseMove(self.engine, self.config.aiLevel);
+        self._applyAIMove(self.ai.chooseMove(self.engine, self.config.aiLevel), id);
       } catch (err) {
         self.aiThinking = false;
         self.toast('Computer error: ' + err.message, true);
+        self._renderStatus();
         self._updateBoardEnabled();
-        return;
       }
-      self.aiThinking = false;
-      if (move) self._playMove(move);
-      else self._renderAll();
-    }, 320);
+    }, 60);
+  };
+
+  G._onWorkerResult = function (data) {
+    if (data.type !== 'result' || data.id !== this.aiRequestId) return;  // stale
+    if (data.error) {
+      this.workerUnavailable = true;
+      if (this.worker) { this.worker.terminate(); this.worker = null; }
+      this._searchOnMainThread();
+      return;
+    }
+    if (typeof data.nodes === 'number') this.ai.nodes = data.nodes;
+
+    // Hold a very fast reply briefly so the opponent does not answer instantly.
+    var elapsed = performance.now() - (this.aiStartedAt || 0);
+    var wait = Math.max(0, MIN_THINK_MS - elapsed);
+    var self = this;
+    var id = data.id;
+    var move = data.move;
+    if (this.aiTimer) global.clearTimeout(this.aiTimer);
+    this.aiTimer = global.setTimeout(function () {
+      self.aiTimer = null;
+      self._applyAIMove(move, id);
+    }, wait);
+  };
+
+  /** Play a move the search produced, guarding against staleness. */
+  G._applyAIMove = function (move, id) {
+    if (id !== this.aiRequestId || !this._aiShouldMove()) return;
+    this.aiThinking = false;
+    if (!move) { this._renderAll(); return; }
+    if (!this._playMove(move)) {
+      // The reply did not fit the current position: search again locally.
+      this.workerUnavailable = true;
+      if (this.worker) { this.worker.terminate(); this.worker = null; }
+      this.aiThinking = true;
+      this._searchOnMainThread();
+    }
   };
 
   // ---- Clocks --------------------------------------------------------------
@@ -447,6 +682,7 @@
     this._renderMoveList();
     this._renderStatus();
     this._updateBoardEnabled();
+    this._scheduleSave();
   };
 
   G._viewer = function () {
@@ -473,6 +709,7 @@
     this.clockRunning = this.engine.gameMoves.length > 0 && this.config.baseSeconds > 0;
     this.lastTick = performance.now();
     this._renderAll();
+    this._scheduleSave();
     this.toast('Move taken back.');
     this._maybeAI();
   };
@@ -532,6 +769,7 @@
     this.clockRunning = false;
     this._cancelAI();
     this._renderAll();
+    this._scheduleSave();
     this._showGameOver(status);
   };
 
@@ -877,6 +1115,34 @@
   };
 
   // ---- Toast ---------------------------------------------------------------
+
+  /**
+   * Send a message to the polite live region so screen-reader users hear
+   * moves, checks, and results without watching the board.
+   */
+  G.announce = function (message) {
+    if (!this.el.srStatus || !message) return;
+    // Re-announce identical text by nudging the content.
+    this.el.srStatus.textContent = this.el.srStatus.textContent === message
+      ? message + ' '
+      : message;
+  };
+
+  G._announceMove = function (move, status) {
+    var mover = move.color === 'w' ? 'White' : 'Black';
+    var parts = [mover + ' plays ' + move.san];
+    if (move.capture) parts.push('capturing a ' + Pieces.NAME[move.capture]);
+    if (status.over) {
+      if (status.reason === 'checkmate') {
+        parts.push('Checkmate. ' + (status.winner === 'w' ? 'White' : 'Black') + ' wins.');
+      } else {
+        parts.push('Game over: ' + this._reasonLabel(status.reason) + '.');
+      }
+    } else if (status.reason === 'check') {
+      parts.push('Check.');
+    }
+    this.announce(parts.join(', '));
+  };
 
   G.toast = function (message, error) {
     var el = document.getElementById('toast');

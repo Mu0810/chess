@@ -122,6 +122,11 @@
     }
     if (!newGameModal.classList.contains('hidden') || !settingsModal.classList.contains('hidden')) return;
 
+    // While the board has focus the arrow keys drive its cursor, so history
+    // navigation must not steal them.
+    var boardFocused = document.activeElement && document.activeElement.id === 'board-grid';
+    if (boardFocused && ev.key.indexOf('Arrow') === 0) return;
+
     if (ev.key === 'ArrowLeft') { ev.preventDefault(); game.navigate(game.viewIndex - 1); }
     else if (ev.key === 'ArrowRight') { ev.preventDefault(); game.navigate(game.viewIndex + 1); }
     else if (ev.key.toLowerCase() === 'f') byId('btn-flip').click();

@@ -688,4 +688,6 @@
   };
 
   global.Chess = Chess;
-})(typeof window !== 'undefined' ? window : global);
+// globalThis works in the page, inside a Web Worker, and in Node. A bare
+// `global` identifier would throw when this file is loaded by a worker.
+})(globalThis);
