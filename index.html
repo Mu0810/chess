@@ -3,18 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Kiro Chess</title>
+  <title>Kiro Chess — play chess in your browser</title>
+  <meta name="description" content="Play chess against a computer opponent or a friend on one device. Full rules, clocks, move history, PGN and FEN import and export." />
+  <meta name="theme-color" content="#131417" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Kiro Chess" />
+  <meta property="og:description" content="Play chess against a computer opponent or a friend on one device." />
+  <meta property="og:image" content="https://onlinechess-655a99eaf495.herokuapp.com/og.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:url" content="https://onlinechess-655a99eaf495.herokuapp.com/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%23131417'/%3E%3Ctext%20x='32'%20y='47'%20font-size='44'%20text-anchor='middle'%20fill='%2381b64c'%20font-family='Apple%20Symbols,serif'%3E%E2%99%9A%3C/text%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" />
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
+  <a class="skip-link" href="#board">Skip to the board</a>
+
+  <!-- Ambient background (decorative only): one accent wash plus film grain -->
+  <div class="ambient" aria-hidden="true">
+    <span class="aurora aurora-1"></span>
+    <span class="aurora aurora-2"></span>
+    <span class="grid-veil"></span>
+    <span class="drifter d1">&#9822;</span>
+    <span class="drifter d2">&#9819;</span>
+    <span class="drifter d3">&#9821;</span>
+    <span class="drifter d4">&#9820;</span>
+  </div>
+  <div class="grain" aria-hidden="true"></div>
+
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark">&#9812;</span>
       <span class="brand-name">Kiro&nbsp;Chess</span>
     </div>
     <nav class="topnav">
-      <button class="nav-btn" id="btn-new-game">New Game</button>
+      <button class="nav-btn" id="btn-new-game">New game</button>
       <button class="nav-btn ghost" id="btn-settings">Settings</button>
     </nav>
   </header>
@@ -33,9 +60,12 @@
         <div class="clock" id="clock-top">10:00</div>
       </div>
 
-      <div class="board-wrap">
-        <div class="board" id="board" aria-label="Chess board"></div>
-        <div class="board-overlay" id="board-overlay"></div>
+      <div class="board-stage">
+        <div class="board-glow" aria-hidden="true"></div>
+        <div class="board-wrap" id="board-wrap">
+          <div class="board" id="board" tabindex="-1" aria-label="Chess board"></div>
+          <div class="board-overlay" id="board-overlay"></div>
+        </div>
       </div>
 
       <div class="player-bar" id="player-bottom">
@@ -52,9 +82,17 @@
 
     <!-- Sidebar -->
     <aside class="sidebar">
-      <div class="panel status-panel">
-        <div class="status-line" id="status-line">White to move</div>
+      <div class="panel status-panel" id="status-panel">
+        <div class="status-head">
+          <span class="turn-dot" id="turn-dot" aria-hidden="true"></span>
+          <div class="status-line" id="status-line">White to move</div>
+          <span class="thinking" id="thinking" aria-hidden="true"><i></i><i></i><i></i></span>
+        </div>
         <div class="eval-line" id="eval-line"></div>
+        <div class="eval-bar" id="eval-bar" role="img" aria-label="Position evaluation">
+          <span class="eval-fill" id="eval-fill"></span>
+          <span class="eval-mid" aria-hidden="true"></span>
+        </div>
       </div>
 
       <div class="panel moves-panel">
@@ -80,7 +118,7 @@
       </div>
 
       <div class="panel io-panel">
-        <div class="panel-title">Import / Export</div>
+        <div class="panel-title">Import / export</div>
         <div class="io-row">
           <button class="mini-btn" id="btn-copy-pgn">Copy PGN</button>
           <button class="mini-btn" id="btn-copy-fen">Copy FEN</button>
@@ -97,13 +135,13 @@
   <!-- New Game dialog -->
   <div class="modal-backdrop hidden" id="newgame-modal">
     <div class="modal">
-      <h2 class="modal-title">New Game</h2>
+      <h2 class="modal-title">New game</h2>
 
       <div class="form-group">
         <label class="form-label">Mode</label>
         <div class="segmented" id="opt-mode">
-          <button class="seg" data-value="ai">vs Computer</button>
-          <button class="seg active" data-value="human">Two Players</button>
+          <button class="seg" data-value="ai">vs computer</button>
+          <button class="seg active" data-value="human">Two players</button>
         </div>
       </div>
 
@@ -139,7 +177,7 @@
       </div>
 
       <div class="modal-actions">
-        <button class="btn-secondary" id="newgame-cancel">Cancel</button>
+        <button class="btn-text" id="newgame-cancel">Cancel</button>
         <button class="btn-primary" id="newgame-start">Start game</button>
       </div>
     </div>
@@ -190,14 +228,30 @@
   <!-- Game over dialog -->
   <div class="modal-backdrop hidden" id="gameover-modal">
     <div class="modal small">
+      <div class="gameover-badge" id="gameover-badge" aria-hidden="true">&#9812;</div>
       <div class="gameover-result" id="gameover-result">Checkmate</div>
       <div class="gameover-detail" id="gameover-detail">White wins</div>
       <div class="modal-actions center">
-        <button class="btn-primary" id="gameover-newgame">New Game</button>
+        <button class="btn-primary" id="gameover-newgame">New game</button>
         <button class="btn-secondary" id="gameover-review">Review</button>
       </div>
     </div>
   </div>
+
+  <!-- In-app confirmation (replaces browser confirm dialogs) -->
+  <div class="modal-backdrop hidden" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal small">
+      <div class="confirm-title" id="confirm-title">Are you sure?</div>
+      <div class="confirm-detail" id="confirm-detail"></div>
+      <div class="modal-actions center">
+        <button class="btn-text" id="confirm-cancel">Cancel</button>
+        <button class="btn-primary" id="confirm-ok">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- celebration particles (decorative) -->
+  <div class="celebration" id="celebration" aria-hidden="true"></div>
 
   <!-- toast -->
   <div class="toast hidden" id="toast"></div>

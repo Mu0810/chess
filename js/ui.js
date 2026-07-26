@@ -82,26 +82,168 @@
     this._renderHighlights();
   };
 
+  /**
+   * Position a piece on its square using the `translate` property.
+   * A piece is 12.5% of the board, so 100% of its own width is exactly one
+   * square: column 3 -> translate: 300% <row>00%. Keeping this on the
+   * compositor (instead of animating left/top) makes moves smooth.
+   */
   B._placePiece = function (el, idx) {
     var sr, sc;
     if (this.orientation === 'w') { sr = rankOf(idx); sc = fileOf(idx); }
     else { sr = 7 - rankOf(idx); sc = 7 - fileOf(idx); }
-    el.style.left = (sc * 12.5) + '%';
-    el.style.top = (sr * 12.5) + '%';
+    el.style.translate = (sc * 100) + '% ' + (sr * 100) + '%';
   };
 
-  B._renderPieces = function () {
+  B._renderPieces = function (options) {
+    options = options || {};
     this.piecesEl.innerHTML = '';
     this.pieceEls = new Array(64);
+    var shown = 0;
     for (var i = 0; i < 64; i++) {
       var p = this.board[i];
       if (!p) continue;
       var el = Pieces.createPieceEl(p.type, p.color);
       el.dataset.idx = i;
       this._placePiece(el, i);
+      if (options.stagger) {
+        var delay = shown * 12;
+        el.classList.add('enter');
+        el.style.animationDelay = delay + 'ms';
+        // Drop the class once it has played so no filled animation lingers.
+        this._transient(el, 'enter', delay + 480);
+      }
       this.piecesEl.appendChild(el);
       this.pieceEls[i] = el;
+      shown++;
     }
+  };
+
+  /**
+   * Reconcile the DOM with `this.board`. Animated updates track pieces
+   * individually, so this runs afterwards as a safety net: any square whose
+   * element is missing, stale, or duplicated is corrected silently.
+   */
+  B._syncPieces = function () {
+    var seen = new Array(64);
+    var stray = [];
+    var nodes = this.piecesEl.children;
+    var i, el, idx;
+
+    for (i = 0; i < nodes.length; i++) {
+      el = nodes[i];
+      // Pieces mid-capture are already detached from the board state and are
+      // removed when their exit animation ends.
+      if (el.classList.contains('captured-out')) continue;
+      idx = +el.dataset.idx;
+      var wanted = (idx >= 0 && idx < 64) ? this.board[idx] : null;
+      var matches = wanted && el.dataset.type === wanted.type && el.dataset.color === wanted.color;
+      if (!matches || seen[idx]) stray.push(el);
+      else seen[idx] = el;
+    }
+
+    for (i = 0; i < stray.length; i++) {
+      if (stray[i].parentNode) stray[i].parentNode.removeChild(stray[i]);
+    }
+
+    this.pieceEls = new Array(64);
+    for (idx = 0; idx < 64; idx++) {
+      var piece = this.board[idx];
+      if (!piece) continue;
+      if (seen[idx]) {
+        this.pieceEls[idx] = seen[idx];
+        continue;
+      }
+      el = Pieces.createPieceEl(piece.type, piece.color);
+      el.dataset.idx = idx;
+      this._placePiece(el, idx);
+      this.piecesEl.appendChild(el);
+      this.pieceEls[idx] = el;
+    }
+  };
+
+  B._transient = function (el, className, duration) {
+    if (!el) return;
+    el.classList.add(className);
+    global.setTimeout(function () { el.classList.remove(className); }, duration);
+  };
+
+  /** Short-lived decorative element layered over a square. */
+  B._spawnEffect = function (idx, className, duration) {
+    var cell = this.cells[idx];
+    if (!cell) return;
+    var fx = document.createElement('span');
+    fx.className = className;
+    cell.appendChild(fx);
+    global.setTimeout(function () {
+      if (fx.parentNode) fx.parentNode.removeChild(fx);
+    }, duration);
+  };
+
+  /** Fade a captured piece out in place instead of removing it instantly. */
+  B._dissolve = function (el) {
+    if (!el) return;
+    el.classList.add('captured-out');
+    el.dataset.idx = '-1';
+    global.setTimeout(function () {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }, 320);
+  };
+
+  /**
+   * Animate a single played move, then reconcile.
+   * `move` is an engine move record (from/to indices, capture, castle,
+   * enpassant, promotion). Returns false when the move cannot be animated
+   * from the currently rendered position.
+   */
+  B._animateMove = function (move) {
+    var mover = this.pieceEls[move.from];
+    if (!mover) return false;
+
+    var self = this;
+    var captureIdx = -1;
+    if (move.enpassant) captureIdx = rankOf(move.from) * 8 + fileOf(move.to);
+    else if (this.pieceEls[move.to]) captureIdx = move.to;
+
+    if (captureIdx >= 0) {
+      this._dissolve(this.pieceEls[captureIdx]);
+      this.pieceEls[captureIdx] = null;
+      this._spawnEffect(captureIdx, 'fx-burst', 620);
+    }
+
+    this.pieceEls[move.from] = null;
+    this.pieceEls[move.to] = mover;
+    mover.dataset.idx = move.to;
+    this._transient(mover, 'gliding', 260);
+    this._placePiece(mover, move.to);
+
+    if (move.castle) {
+      var rookFrom = move.castle === 'k' ? (move.color === 'w' ? 63 : 7) : (move.color === 'w' ? 56 : 0);
+      var rookTo = move.castle === 'k' ? (move.color === 'w' ? 61 : 5) : (move.color === 'w' ? 59 : 3);
+      var rook = this.pieceEls[rookFrom];
+      if (rook) {
+        this.pieceEls[rookFrom] = null;
+        this.pieceEls[rookTo] = rook;
+        rook.dataset.idx = rookTo;
+        this._transient(rook, 'gliding', 260);
+        this._placePiece(rook, rookTo);
+      }
+    }
+
+    if (move.promotion) {
+      global.setTimeout(function () {
+        var current = self.pieceEls[move.to];
+        if (current && current.dataset.color === move.color) {
+          current.textContent = Pieces.GLYPH[move.promotion];
+          current.dataset.type = move.promotion;
+          self._transient(current, 'promoted', 640);
+        }
+        self._spawnEffect(move.to, 'fx-promote', 720);
+      }, 180);
+    }
+
+    this._spawnEffect(move.to, 'fx-land', 520);
+    return true;
   };
 
   B._renderHighlights = function () {
@@ -123,6 +265,7 @@
         var t = this.legal[k].toIdx;
         var cell = this.cells[t];
         if (!cell) continue;
+        cell.style.setProperty('--marker-delay', (k * 22) + 'ms');
         cell.classList.add(this.board[t] ? 'legal-cap' : 'legal');
       }
     }
@@ -131,11 +274,19 @@
   // ---- Public API ----------------------------------------------------------
 
   B.setPosition = function (state) {
+    var previous = this.board;
     this.board = state.board.slice();
     if (state.lastMove !== undefined) this.lastMove = state.lastMove;
     if (state.check !== undefined) this.checkIdx = state.check;
     this._clearSelectionState();
-    this._renderPieces();
+
+    var animated = false;
+    if (state.move && previous && previous[state.move.from]) {
+      animated = this._animateMove(state.move);
+    }
+    if (animated) this._syncPieces();
+    else this._renderPieces({ stagger: !!state.stagger });
+
     this._renderHighlights();
   };
 
@@ -148,7 +299,12 @@
   };
 
   B.flip = function () {
-    this.setOrientation(this.orientation === 'w' ? 'b' : 'w');
+    var self = this;
+    var stage = this.boardEl.parentNode;
+    if (stage && stage.classList) this._transient(stage, 'flipping', 460);
+    global.setTimeout(function () {
+      self.setOrientation(self.orientation === 'w' ? 'b' : 'w');
+    }, 170);
   };
 
   // ---- Selection -----------------------------------------------------------
@@ -243,12 +399,10 @@
     }
     if (!this.drag.el) return;
     var rect = this.boardEl.getBoundingClientRect();
-    var size = rect.width;
-    var half = size / 16;
+    var half = rect.width / 16;
     var x = e.clientX - rect.left - half;
     var y = e.clientY - rect.top - half;
-    this.drag.el.style.left = (x / size * 100) + '%';
-    this.drag.el.style.top = (y / size * 100) + '%';
+    this.drag.el.style.translate = x + 'px ' + y + 'px';
   };
 
   B._onUp = function (e) {
@@ -300,6 +454,7 @@
       (function (t) {
         var opt = document.createElement('button');
         opt.className = 'promo-opt ' + (color === 'w' ? 'white' : 'black');
+        opt.style.animationDelay = (i * 55) + 'ms';
         opt.appendChild(Pieces.glyphSpan(t, color));
         opt.addEventListener('click', function () { finish(t); });
         box.appendChild(opt);

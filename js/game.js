@@ -68,8 +68,65 @@
       ioText: document.getElementById('io-text'),
       gameoverModal: document.getElementById('gameover-modal'),
       gameoverResult: document.getElementById('gameover-result'),
-      gameoverDetail: document.getElementById('gameover-detail')
+      gameoverDetail: document.getElementById('gameover-detail'),
+      gameoverBadge: document.getElementById('gameover-badge'),
+      statusPanel: document.getElementById('status-panel'),
+      turnDot: document.getElementById('turn-dot'),
+      thinking: document.getElementById('thinking'),
+      evalFill: document.getElementById('eval-fill'),
+      boardWrap: document.getElementById('board-wrap'),
+      celebration: document.getElementById('celebration'),
+      confirmModal: document.getElementById('confirm-modal'),
+      confirmTitle: document.getElementById('confirm-title'),
+      confirmDetail: document.getElementById('confirm-detail'),
+      confirmOk: document.getElementById('confirm-ok'),
+      confirmCancel: document.getElementById('confirm-cancel')
     };
+  };
+
+  /**
+   * In-app confirmation dialog. Replaces window.confirm so the interaction
+   * stays inside the app's own design and can be styled and animated.
+   * Calls `cb(true)` on confirm, `cb(false)` on cancel / Escape / backdrop.
+   */
+  G.confirm = function (opts, cb) {
+    var self = this;
+    var modal = this.el.confirmModal;
+    if (!modal) { cb(global.confirm(opts.title)); return; }
+
+    this.el.confirmTitle.textContent = opts.title || 'Are you sure?';
+    this.el.confirmDetail.textContent = opts.detail || '';
+    this.el.confirmOk.textContent = opts.confirmLabel || 'Confirm';
+    this.el.confirmOk.classList.toggle('danger', !!opts.danger);
+
+    var settled = false;
+    function close(result) {
+      if (settled) return;
+      settled = true;
+      modal.classList.add('hidden');
+      self.el.confirmOk.removeEventListener('click', onOk);
+      self.el.confirmCancel.removeEventListener('click', onCancel);
+      modal.removeEventListener('pointerdown', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+      self.confirmOpen = false;
+      cb(result);
+    }
+    function onOk() { close(true); }
+    function onCancel() { close(false); }
+    function onBackdrop(ev) { if (ev.target === modal) close(false); }
+    function onKey(ev) {
+      if (ev.key === 'Escape') { ev.preventDefault(); close(false); }
+      else if (ev.key === 'Enter') { ev.preventDefault(); close(true); }
+    }
+
+    this.el.confirmOk.addEventListener('click', onOk);
+    this.el.confirmCancel.addEventListener('click', onCancel);
+    modal.addEventListener('pointerdown', onBackdrop);
+    document.addEventListener('keydown', onKey);
+
+    this.confirmOpen = true;
+    modal.classList.remove('hidden');
+    this.el.confirmOk.focus();
   };
 
   G._bindActions = function () {
@@ -130,8 +187,12 @@
     this.clockRunning = false;
     this.lastTick = performance.now();
 
+    this._pendingMove = null;
+    this._justMoved = false;
+    this._staggerNext = true;    // pieces cascade onto a fresh board
     this.boardUI.setOrientation(this.config.mode === 'ai' ? this.config.humanColor : 'w');
     this.el.gameoverModal.classList.add('hidden');
+    this._clearCelebration();
     this.sounds.play('start');
     this._renderAll();
     this._maybeAI();
@@ -257,7 +318,13 @@
 
     var status = this.engine.status();
     this._playMoveSound(move, status);
+    this._pendingMove = move;   // lets the board animate this exact move
+    this._justMoved = true;
     this._renderAll();
+
+    if (status.reason === 'check' && this.el.boardWrap) {
+      this.boardUI._transient(this.el.boardWrap, 'shock', 520);
+    }
 
     if (status.over) this._finish(status);
     else this._maybeAI();
@@ -357,8 +424,11 @@
     this.el.clockBottom.textContent = this._formatClock(this.clocks[bottom]);
     this.el.clockTop.textContent = this._formatClock(this.clocks[top]);
 
-    this.el.clockBottom.classList.toggle('low', this.config.baseSeconds > 0 && this.clocks[bottom] < 20000);
-    this.el.clockTop.classList.toggle('low', this.config.baseSeconds > 0 && this.clocks[top] < 20000);
+    var timed = this.config.baseSeconds > 0;
+    this.el.clockBottom.classList.toggle('low', timed && this.clocks[bottom] < 20000);
+    this.el.clockTop.classList.toggle('low', timed && this.clocks[top] < 20000);
+    this.el.clockBottom.classList.toggle('critical', timed && this.active && this.clocks[bottom] < 10000);
+    this.el.clockTop.classList.toggle('critical', timed && this.active && this.clocks[top] < 10000);
 
     var bottomActive = this.active && this.clockRunning && this.engine.turn === bottom;
     var topActive = this.active && this.clockRunning && this.engine.turn === top;
@@ -429,17 +499,30 @@
       }
       return;
     }
-    if (global.confirm('Do both players agree to a draw?')) {
-      this._finish({ over: true, reason: 'agreement', winner: null });
-    }
+    var self = this;
+    this.confirm({
+      title: 'Agree to a draw?',
+      detail: 'Both players need to accept. The game ends as a draw.',
+      confirmLabel: 'Agree to draw'
+    }, function (ok) {
+      if (ok) self._finish({ over: true, reason: 'agreement', winner: null });
+    });
   };
 
   G.resign = function () {
     if (!this.active) { this.toast('The game is already over.'); return; }
     var side = this.engine.turn;
     if (this.config.mode === 'ai') side = this.config.humanColor;
-    if (!global.confirm((side === 'w' ? 'White' : 'Black') + ', resign this game?')) return;
-    this._finish({ over: true, reason: 'resignation', winner: side === 'w' ? 'b' : 'w' });
+    var name = side === 'w' ? 'White' : 'Black';
+    var self = this;
+    this.confirm({
+      title: 'Resign as ' + name + '?',
+      detail: 'This ends the game and awards the win to your opponent.',
+      confirmLabel: 'Resign',
+      danger: true
+    }, function (ok) {
+      if (ok) self._finish({ over: true, reason: 'resignation', winner: side === 'w' ? 'b' : 'w' });
+    });
   };
 
   G._finish = function (status) {
@@ -467,7 +550,40 @@
 
     this.el.gameoverResult.textContent = title;
     this.el.gameoverDetail.textContent = detail;
+    if (this.el.gameoverBadge) {
+      this.el.gameoverBadge.textContent = status.winner ? '\u265A' : '\u00BD';
+      this.el.gameoverBadge.classList.toggle('draw', !status.winner);
+    }
     this.el.gameoverModal.classList.remove('hidden');
+    if (status.winner) this._celebrate();
+  };
+
+  G._clearCelebration = function () {
+    if (this.el.celebration) this.el.celebration.innerHTML = '';
+  };
+
+  /** Confetti burst on a decisive result. Purely decorative. */
+  G._celebrate = function () {
+    var host = this.el.celebration;
+    if (!host) return;
+    if (global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    host.innerHTML = '';
+    var colors = ['#81b64c', '#f5d76e', '#e9e9e4', '#5f9dbd', '#d1514b'];
+    for (var i = 0; i < 70; i++) {
+      var bit = document.createElement('span');
+      bit.className = 'confetti';
+      bit.style.left = (Math.random() * 100) + '%';
+      bit.style.background = colors[i % colors.length];
+      bit.style.animationDelay = (Math.random() * 550) + 'ms';
+      bit.style.animationDuration = (1900 + Math.random() * 1500) + 'ms';
+      bit.style.setProperty('--drift', (Math.random() * 160 - 80).toFixed(0) + 'px');
+      bit.style.setProperty('--spin', (Math.random() * 900 - 450).toFixed(0) + 'deg');
+      host.appendChild(bit);
+    }
+    var self = this;
+    global.clearTimeout(this._confettiTimer);
+    this._confettiTimer = global.setTimeout(function () { self._clearCelebration(); }, 4200);
   };
 
   // ---- Export / clipboard --------------------------------------------------
@@ -540,7 +656,17 @@
     this._renderCaptured();
     this._renderClocks();
     this._renderStatus();
+    this._renderEvalBar();
     this._updateBoardEnabled();
+    this._justMoved = false;
+  };
+
+  /** Advantage bar: white's share of the evaluation, smoothed for display. */
+  G._renderEvalBar = function () {
+    if (!this.el.evalFill) return;
+    var pawns = this.ai.evaluate(this._viewer()) / 100;
+    var share = 50 + 50 * (2 / (1 + Math.exp(-pawns / 3.2)) - 1);
+    this.el.evalFill.style.width = Math.max(3, Math.min(97, share)).toFixed(1) + '%';
   };
 
   G._renderBoard = function () {
@@ -551,7 +677,17 @@
       var m = this.engine.gameMoves[this.viewIndex - 1];
       if (m) last = { from: m.from, to: m.to };
     }
-    this.boardUI.setPosition({ board: viewer.board, lastMove: last, check: check });
+
+    var animateMove = this._pendingMove;
+    this._pendingMove = null;
+    this.boardUI.setPosition({
+      board: viewer.board,
+      lastMove: last,
+      check: check,
+      move: animateMove,
+      stagger: this._staggerNext
+    });
+    this._staggerNext = false;
   };
 
   G._updateBoardEnabled = function () {
@@ -562,6 +698,13 @@
     var self = this;
     var moves = this.engine.gameMoves;
     this.el.moves.innerHTML = '';
+
+    if (!moves.length) {
+      this.el.moves.appendChild(this._movesEmptyState());
+      this.el.moves.onclick = null;
+      return;
+    }
+
     for (var i = 0; i < moves.length; i += 2) {
       var tr = document.createElement('tr');
       var num = document.createElement('td');
@@ -586,12 +729,42 @@
     this.el.moves.onclick = clickHandler;
   };
 
+  /** Composed placeholder shown before the first move is played. */
+  G._movesEmptyState = function () {
+    var tr = document.createElement('tr');
+    var td = document.createElement('td');
+    td.className = 'moves-empty';
+    td.colSpan = 3;
+
+    var mark = document.createElement('div');
+    mark.className = 'empty-mark';
+    mark.textContent = '\u265F';
+
+    var text = document.createElement('div');
+    text.className = 'empty-text';
+    text.textContent = 'No moves yet';
+
+    var hint = document.createElement('div');
+    hint.className = 'empty-hint';
+    hint.textContent = this._isHumanTurn()
+      ? 'Drag a piece or tap a square to begin.'
+      : 'The computer opens this game.';
+
+    td.appendChild(mark);
+    td.appendChild(text);
+    td.appendChild(hint);
+    tr.appendChild(td);
+    return tr;
+  };
+
   G._moveCell = function (move, view) {
     var td = document.createElement('td');
     td.className = 'move-cell';
     td.dataset.view = view;
     td.textContent = move.san;
     td.title = move.fromAlg + '–' + move.toAlg;
+    // Only the move just played animates in, so the list never re-flashes.
+    if (this._justMoved && view === this.engine.gameMoves.length) td.classList.add('fresh');
     return td;
   };
 
@@ -609,15 +782,33 @@
       return;
     }
     if (this.aiThinking) {
-      this.el.status.textContent = 'Computer is thinking…';
+      this.el.status.textContent = 'Computer is thinking';
     } else {
       var color = this.engine.turn === 'w' ? 'White' : 'Black';
       this.el.status.textContent = (this.engine.inCheck() ? 'Check — ' : '') + color + ' to move';
     }
+    this._renderStatusIndicators();
     var ev = this.ai.evaluate(this.engine) / 100;
     var evText = Math.abs(ev) < 0.05 ? 'Position is equal' : (ev > 0 ? 'White +' : 'Black +') + Math.abs(ev).toFixed(1);
     if (this.aiThinking && this.ai.nodes) evText += ' · ' + this.ai.nodes.toLocaleString() + ' nodes';
     this.el.evaluation.textContent = evText;
+  };
+
+  G._renderStatusIndicators = function () {
+    var panel = this.el.statusPanel;
+    var reviewing = !this._atLatest();
+    if (this.el.thinking) {
+      this.el.thinking.classList.toggle('on', !!this.aiThinking && !reviewing);
+    }
+    if (this.el.turnDot) {
+      this.el.turnDot.classList.toggle('black', this.engine.turn === 'b');
+      this.el.turnDot.classList.toggle('idle', !this.active || reviewing);
+    }
+    if (panel) {
+      panel.classList.toggle('is-check', this.active && !reviewing && this.engine.inCheck());
+      panel.classList.toggle('is-over', !this.active);
+      panel.classList.toggle('is-thinking', !!this.aiThinking && !reviewing);
+    }
   };
 
   G._reasonLabel = function (reason) {
@@ -663,8 +854,13 @@
   };
 
   G._fillCaptured = function (el, types, capturedColor, all) {
+    var wasCount = el.childElementCount;
     el.innerHTML = '';
-    for (var i = 0; i < types.length; i++) el.appendChild(Pieces.glyphSpan(types[i], capturedColor, 'captured-glyph'));
+    for (var i = 0; i < types.length; i++) {
+      var glyph = Pieces.glyphSpan(types[i], capturedColor, 'captured-glyph');
+      if (this._justMoved && i === types.length - 1 && types.length > wasCount) glyph.classList.add('fresh');
+      el.appendChild(glyph);
+    }
 
     var whiteScore = 0, blackScore = 0;
     for (var w = 0; w < all.w.length; w++) whiteScore += MATERIAL[all.w[w]];
