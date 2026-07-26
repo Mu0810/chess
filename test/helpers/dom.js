@@ -199,19 +199,29 @@ function installDom({ ids = [], withWorker = false, keepStorage = false } = {}) 
   }
   FakeWorker.instances = [];
 
-  globalThis.window = globalThis;
-  globalThis.document = document;
-  globalThis.navigator = { clipboard: null };
-  globalThis.isSecureContext = false;
+  // Node 21+ ships some of these as read-only accessors on globalThis, so a
+  // plain assignment would throw under strict mode. Define them instead.
+  const setGlobal = (name, value) => {
+    Object.defineProperty(globalThis, name, {
+      value, writable: true, configurable: true, enumerable: true
+    });
+  };
+
+  setGlobal('window', globalThis);
+  setGlobal('document', document);
+  setGlobal('navigator', { clipboard: null });
+  setGlobal('isSecureContext', false);
+  setGlobal('matchMedia', () => ({ matches: false, addEventListener() {} }));
+  setGlobal('confirm', () => { throw new Error('window.confirm must not be used'); });
+  setGlobal('alert', () => { throw new Error('window.alert must not be used'); });
+
   // Storage belongs to the origin, not the page, so it survives a "reload"
   // unless a test explicitly wants a clean slate.
-  if (!globalThis.localStorage) globalThis.localStorage = new LocalStorage();
+  if (!(globalThis.localStorage instanceof LocalStorage)) setGlobal('localStorage', new LocalStorage());
   if (!keepStorage) globalThis.localStorage.clear();
-  globalThis.matchMedia = () => ({ matches: false, addEventListener() {} });
-  globalThis.confirm = () => { throw new Error('window.confirm must not be used'); };
-  globalThis.alert = () => { throw new Error('window.alert must not be used'); };
-  if (withWorker) globalThis.Worker = FakeWorker;
-  else delete globalThis.Worker;
+
+  if (withWorker) setGlobal('Worker', FakeWorker);
+  else if ('Worker' in globalThis) setGlobal('Worker', undefined);
 
   const load = () => {
     for (const mod of ['pieces', 'engine', 'ai', 'sounds', 'ui', 'game']) {
