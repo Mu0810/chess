@@ -1,0 +1,98 @@
+![Kiro Chess](og.png)
+
+# Kiro Chess
+
+A complete chess app that runs in the browser with no dependencies and no build step.
+
+**Live:** https://onlinechess-655a99eaf495.herokuapp.com/
+
+## Features
+
+**Rules** — full legal move generation including castling, en passant, and promotion, with check, checkmate, stalemate, threefold repetition, the fifty-move rule, and insufficient-material draws.
+
+**Opponents** — play the computer at four strengths, or pass and play locally on one device.
+
+**Clocks** — bullet, blitz, and rapid presets with increment support, plus an unlimited mode.
+
+**Board** — drag and drop or tap to move, legal-move hints, last-move and check highlights, coordinates, and board flip.
+
+**Review** — move history in algebraic notation, clickable to jump to any position, with arrow-key navigation and takeback.
+
+**Analysis** — live evaluation bar, captured pieces, and material advantage.
+
+**Import and export** — copy or load PGN and FEN.
+
+**Presentation** — four board themes, synthesized sound effects, and a responsive layout. Respects `prefers-reduced-motion`, includes a skip link and visible focus states.
+
+Not included: online multiplayer, accounts, ratings, and puzzles. Those need a backend and a database.
+
+## Running it
+
+Open `index.html` directly in a browser. Nothing to install.
+
+To run the production server instead:
+
+```bash
+npm start          # serves on http://localhost:3000, or $PORT
+```
+
+Requires Node.js 24 or newer. There are no runtime dependencies.
+
+## Project layout
+
+```
+index.html        markup and dialogs
+css/styles.css    design tokens, layout, and motion
+js/engine.js      rules engine: move generation, SAN, FEN, PGN
+js/ai.js          negamax search with alpha-beta and quiescence
+js/ui.js          board rendering and pointer input
+js/game.js        controller: clocks, history, actions
+js/main.js        settings, dialogs, keyboard shortcuts
+js/pieces.js      piece glyphs
+js/sounds.js      Web Audio sound effects
+server.js         static server used in production
+```
+
+The engine indexes the board 0–63 with index 0 at a8. Pieces are positioned with the
+CSS `translate` property so movement stays on the compositor.
+
+## Correctness
+
+Move generation is verified with [perft](https://www.chessprogramming.org/Perft_Results) against
+the standard test positions:
+
+| Position | Depth | Nodes |
+| --- | --- | --- |
+| Initial | 4 | 197,281 |
+| Kiwipete | 3 | 97,862 |
+| Position 3 | 4 | 43,238 |
+| Position 4 | 3 | 9,467 |
+| Position 5 | 3 | 62,379 |
+
+All match the published counts. To check yourself:
+
+```bash
+node -e 'require("./js/engine.js"); console.log(new Chess().perft(4))'   # 197281
+```
+
+## Deploying
+
+The app is a Node process that serves static files, so any Node host works. For Heroku:
+
+```bash
+heroku create your-app-name
+git push heroku main
+```
+
+Heroku detects Node from `package.json` and runs `npm start`.
+
+## Credits
+
+The visual design pass follows the `redesign-existing-projects` skill from
+[Open Design](https://github.com/nexu-io/open-design) (MIT licensed) — swapping generic
+defaults for deliberate typography, a single accent colour, tinted shadows, and
+compositor-driven motion. Content was rephrased for compliance with licensing restrictions.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
