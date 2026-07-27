@@ -34,7 +34,7 @@
   var settingsModal = byId('settings-modal');
   var confirmModal = byId('confirm-modal');
   var game = new Game();
-  globalThis.kiroChess = game;
+  globalThis.onlinechess = game;
 
   // ---- New game dialog -----------------------------------------------------
 
@@ -69,7 +69,7 @@
   // ---- Settings ------------------------------------------------------------
 
   var stored = {};
-  try { stored = JSON.parse(localStorage.getItem('kiro-chess-settings') || '{}'); }
+  try { stored = JSON.parse(localStorage.getItem('onlinechess-settings') || '{}'); }
   catch (err) { stored = {}; }
 
   var settings = {
@@ -85,7 +85,7 @@
     selectValue('opt-theme', settings.theme);
     selectValue('opt-sound', settings.sound);
     selectValue('opt-hints', settings.hints);
-    try { localStorage.setItem('kiro-chess-settings', JSON.stringify(settings)); }
+    try { localStorage.setItem('onlinechess-settings', JSON.stringify(settings)); }
     catch (err) { /* storage can be unavailable under strict file:// settings */ }
   }
 

@@ -9,7 +9,7 @@
 
   var MATERIAL = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
-  var SAVE_KEY = 'kiro-chess-game';
+  var SAVE_KEY = 'onlinechess-game';
   var SAVE_VERSION = 1;
 
   function Game() {
@@ -832,7 +832,8 @@
     var mm = String(now.getMonth() + 1).padStart(2, '0');
     var dd = String(now.getDate()).padStart(2, '0');
     var h = {
-      Event: 'Kiro Chess Game',
+      Event: 'onlinechess game',
+      Site: 'https://onlinechess.me',
       Date: yyyy + '.' + mm + '.' + dd,
       White: this._nameForColor('w'),
       Black: this._nameForColor('b'),

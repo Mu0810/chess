@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Kiro Chess - design system, layout, and motion
+   onlinechess - design system, layout, and motion
    Sections: tokens / keyframes / chrome / board / sidebar / dialogs /
              effects / responsive / reduced-motion
    ========================================================================== */
@@ -41,7 +41,8 @@
 
   --radius: 14px;
   --radius-sm: 9px;
-  --board-size: min(calc(100dvh - 190px), calc(100vw - 480px), 748px);
+  /* Leaves room for the header, both player bars, and the slim page footer. */
+  --board-size: min(calc(100dvh - 236px), calc(100vw - 480px), 748px);
 
   /* Shadows carry the hue of the background rather than flat black. */
   --shadow-cast: 222 30% 4%;
@@ -969,6 +970,8 @@ body.hide-hints .sq.legal::after, body.hide-hints .sq.legal-cap::after { display
    ========================================================================== */
 @media (max-width: 940px) {
   :root { --board-size: min(calc(100vw - 26px), 700px); }
+  .page { padding: 26px 18px 40px; }
+  .footer-inner { grid-template-columns: 1fr; gap: 22px; }
   body { overflow-y: auto; }
   .topbar { padding: 0 14px; }
   .layout { width: 100%; margin: 12px auto 26px; grid-template-columns: var(--board-size); gap: 16px; }
@@ -1009,4 +1012,181 @@ body.hide-hints .sq.legal::after, body.hide-hints .sq.legal-cap::after { display
   }
   .aurora, .drifter, .board-glow, .brand-name, .brand-mark { animation: none !important; }
   .piece { transition: none !important; }
+}
+
+/* ==========================================================================
+   Site chrome: footer, content pages, not-found
+   ========================================================================== */
+
+/* Content pages scroll normally, unlike the viewport-fitted board page. */
+.page-body { display: flex; min-height: 100dvh; flex-direction: column; }
+.page-body .topbar { flex: 0 0 auto; }
+.page-body .site-footer { margin-top: auto; }
+
+.brand { text-decoration: none; color: inherit; }
+a.brand:hover .brand-name { filter: brightness(1.15); }
+
+.nav-btn { display: inline-flex; align-items: center; text-decoration: none; }
+
+/* ---- Footer ---- */
+.site-footer {
+  position: relative;
+  z-index: var(--z-content);
+  border-top: 1px solid var(--line);
+  background: rgba(15, 16, 19, 0.6);
+  backdrop-filter: blur(14px);
+}
+.footer-inner {
+  width: min(1210px, calc(100vw - 34px));
+  margin: 0 auto;
+  padding: 34px 0 26px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 30px;
+  align-items: start;
+}
+.footer-brand { display: flex; align-items: center; gap: 9px; }
+.footer-brand .brand-mark { font-size: 27px; }
+.footer-name { font-size: 17px; font-weight: 800; letter-spacing: -0.3px; }
+.footer-tag { margin: 10px 0 4px; color: var(--muted); font-size: 13.5px; max-width: 42ch; }
+.footer-where { margin: 0; color: var(--faint); font-size: 12.5px; }
+
+.footer-links { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.footer-links a {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.16s;
+}
+.footer-links a:hover { color: var(--text); text-decoration: underline; }
+
+.footer-legal {
+  width: min(1210px, calc(100vw - 34px));
+  margin: 0 auto;
+  padding: 14px 0 18px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--faint);
+  font-size: 12px;
+}
+.footer-legal p { margin: 0; }
+.footer-legal a { color: var(--muted); text-decoration: none; }
+.footer-legal a:hover { color: var(--text); text-decoration: underline; }
+
+/* Slim variant used under the board so the page still fits the viewport. */
+.site-footer.compact { background: transparent; backdrop-filter: none; }
+.site-footer.compact .footer-legal { border-top: 0; padding: 10px 0 12px; }
+
+/* ---- Content pages ---- */
+.page {
+  position: relative;
+  z-index: var(--z-content);
+  width: 100%;
+  padding: 46px 24px 64px;
+}
+.prose {
+  width: min(70ch, 100%);
+  margin: 0 auto;
+  animation: rise-in 0.5s var(--ease-out) both;
+}
+.eyebrow {
+  margin: 0 0 10px;
+  color: var(--accent-hover);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+.prose h1 {
+  margin: 0 0 16px;
+  font-size: clamp(30px, 5vw, 44px);
+  font-weight: 800;
+  letter-spacing: -1px;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+.prose h2 {
+  margin: 38px 0 12px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.prose p, .prose li { color: #d6d8dd; font-size: 15.5px; line-height: 1.7; text-wrap: pretty; }
+.prose .lede { color: var(--text); font-size: clamp(17px, 2.2vw, 19px); line-height: 1.6; }
+.prose ul { padding-left: 20px; }
+.prose li { margin: 7px 0; }
+.prose a { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 3px; }
+.prose a:hover { color: #b2e178; }
+.prose strong { color: var(--text); font-weight: 650; }
+.meta-line { color: var(--faint) !important; font-size: 12.5px !important; }
+.mono { font-family: var(--font-mono); font-size: 0.92em; }
+
+/* Key company facts, read as a definition list without the markup weight. */
+.facts { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 1px; background: var(--line); border-radius: var(--radius); overflow: hidden; }
+.facts li {
+  margin: 0;
+  padding: 12px 16px;
+  background: var(--panel);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 14.5px;
+}
+.facts li span {
+  min-width: 108px;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  align-self: center;
+}
+
+.contact-grid {
+  margin: 26px 0 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+  gap: 14px;
+}
+.contact-card {
+  padding: 18px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  transition: border-color 0.25s var(--ease-out), transform 0.25s var(--ease-out);
+}
+.contact-card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+.contact-card h2 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--faint); }
+.contact-card p { margin: 0 0 4px; font-size: 15px; }
+.contact-note { color: var(--faint) !important; font-size: 12.5px !important; }
+
+/* ---- Not found ---- */
+.notfound {
+  position: relative;
+  z-index: var(--z-content);
+  margin: auto;
+  padding: 40px 24px;
+  text-align: center;
+  animation: pop-in 0.4s var(--ease-out) both;
+}
+.notfound-mark {
+  font-family: var(--font-chess);
+  font-size: 78px;
+  line-height: 1;
+  color: var(--accent);
+  filter: drop-shadow(0 4px 14px color-mix(in srgb, var(--accent) 40%, transparent));
+}
+.notfound h1 { margin: 16px 0 8px; font-size: 27px; font-weight: 800; letter-spacing: -0.6px; }
+.notfound p { margin: 0 0 24px; color: var(--muted); font-size: 15px; }
+.notfound .btn-primary { display: inline-block; text-decoration: none; }
+
+@media (max-width: 540px) {
+  .page { padding: 30px 16px 44px; }
+  .footer-inner { padding: 26px 0 20px; }
+  .footer-legal { justify-content: flex-start; }
 }

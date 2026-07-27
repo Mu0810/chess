@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const { newGame, disposeGame, boardMatchesDom } = require('./helpers/dom.js');
 
-const SAVE_KEY = 'kiro-chess-game';
+const SAVE_KEY = 'onlinechess-game';
 const tick = (ms = 200) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Read whatever the app has written, parsed. */
