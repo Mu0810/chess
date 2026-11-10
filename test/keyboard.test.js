@@ -218,3 +218,102 @@ test('pointer selection keeps the keyboard cursor in step', () => {
     assert.ok(game.boardUI.cells[sq('g1')].classList.contains('cursor'));
   } finally { disposeGame(game); }
 });
+
+function openPromotion() {
+  const harness = startGame();
+  const { game } = harness;
+  game.loadFen('7k/P7/8/8/8/8/8/7K w - - 0 1');
+  game.boardUI.squaresEl.focus();
+  game.boardUI._setCursor(sq('a7'), { silent: true });
+  press(game, 'Enter');
+  game.boardUI._setCursor(sq('a8'), { silent: true });
+  press(game, 'Enter');
+  return harness;
+}
+
+test('keyboard promotion focuses a named piece choice', () => {
+  const { game, document } = openPromotion();
+  try {
+    const options = document.getElementById('promo-box').children;
+    assert.equal(document.getElementById('promo-modal').classList.contains('hidden'), false);
+    assert.equal(document.activeElement, options[0], 'queen receives focus');
+    assert.deepEqual(options.map((opt) => opt.getAttribute('aria-label')), [
+      'Promote to queen', 'Promote to rook', 'Promote to bishop', 'Promote to knight'
+    ]);
+    assert.equal(game.engine.gameMoves.length, 0, 'the move waits for a choice');
+  } finally { disposeGame(game); }
+});
+
+test('promotion traps Tab and arrow navigation and Enter chooses the focused piece', () => {
+  const { game, document } = openPromotion();
+  try {
+    const modal = document.getElementById('promo-modal');
+    const options = document.getElementById('promo-box').children;
+    modal.dispatch('keydown', { key: 'Tab', shiftKey: true });
+    assert.equal(document.activeElement, options[3], 'Shift+Tab wraps to knight');
+    modal.dispatch('keydown', { key: 'Tab' });
+    assert.equal(document.activeElement, options[0], 'Tab wraps to queen');
+    modal.dispatch('keydown', { key: 'ArrowRight' });
+    assert.equal(document.activeElement, options[1]);
+    modal.dispatch('keydown', { key: 'Enter' });
+
+    assert.equal(game.engine.board[sq('a8')].type, 'r');
+    assert.equal(game.engine.gameMoves.length, 1);
+    assert.equal(modal.classList.contains('hidden'), true);
+    assert.equal(document.activeElement, game.boardUI.squaresEl);
+  } finally { disposeGame(game); }
+});
+
+test('N promotes to a knight and is consumed before global shortcuts can run', () => {
+  const { game, document } = openPromotion();
+  try {
+    let prevented = false;
+    let stopped = false;
+    document.getElementById('promo-modal').dispatch('keydown', {
+      key: 'N',
+      preventDefault() { prevented = true; },
+      stopPropagation() { stopped = true; }
+    });
+    assert.equal(game.engine.board[sq('a8')].type, 'n');
+    assert.equal(prevented, true);
+    assert.equal(stopped, true);
+  } finally { disposeGame(game); }
+});
+
+test('Escape cancels promotion without moving the pawn and returns focus to the board', () => {
+  const { game, document } = openPromotion();
+  try {
+    const fen = game.engine.fen();
+    document.getElementById('promo-modal').dispatch('keydown', { key: 'Escape' });
+    assert.equal(game.engine.fen(), fen);
+    assert.equal(game.boardUI._promotionCancel, null);
+    assert.equal(document.activeElement, game.boardUI.squaresEl);
+    assert.equal(document.getElementById('promo-modal').classList.contains('hidden'), true);
+    game.boardUI._setCursor(sq('a7'), { silent: true });
+    press(game, 'Enter');
+    assert.equal(game.boardUI.selected, sq('a7'), 'the pawn can be selected again');
+  } finally { disposeGame(game); }
+});
+
+test('board input is suspended while a promotion choice is pending', () => {
+  const { game } = openPromotion();
+  try {
+    game.boardUI._setCursor(sq('h1'), { silent: true });
+    press(game, 'Enter');
+    assert.equal(game.boardUI.selected, null, 'another piece cannot be picked up behind the dialog');
+    assert.equal(game.engine.gameMoves.length, 0);
+  } finally { disposeGame(game); }
+});
+
+test('loading another position cancels promotion and ignores a stale choice', () => {
+  const { game, document } = openPromotion();
+  try {
+    const oldChoice = document.getElementById('promo-box').children[0];
+    game.loadFen(globalThis.Chess.START_FEN);
+    oldChoice.dispatch('click');
+    assert.equal(game.engine.fen(), globalThis.Chess.START_FEN);
+    assert.equal(game.engine.gameMoves.length, 0);
+    assert.equal(game.boardUI._promotionCancel, null);
+    assert.equal(document.getElementById('promo-modal').classList.contains('hidden'), true);
+  } finally { disposeGame(game); }
+});

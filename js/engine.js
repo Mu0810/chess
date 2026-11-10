@@ -54,7 +54,7 @@
     this._posCounts = {};  // repetition counts keyed by position
     this._keyStack = [];   // aligned with gameMoves
 
-    this.load(fen || START_FEN);
+    this.load(fen == null ? START_FEN : fen);
   }
 
   Chess.START_FEN = START_FEN;
@@ -69,12 +69,15 @@
   // ---- Loading / exporting -------------------------------------------------
 
   P.load = function (fen) {
+    if (typeof fen !== 'string') throw new Error('Invalid FEN: expected text');
     var parts = fen.trim().split(/\s+/);
+    if (parts.length !== 6) throw new Error('Invalid FEN: expected six fields');
     var placement = parts[0];
     var rows = placement.split('/');
     if (rows.length !== 8) throw new Error('Invalid FEN: bad rank count');
 
-    this.board = new Array(64).fill(null);
+    // Parse and validate before replacing any current game state.
+    var board = new Array(64).fill(null);
     for (var r = 0; r < 8; r++) {
       var row = rows[r];
       var c = 0;
@@ -83,16 +86,38 @@
         if (/[1-8]/.test(ch)) {
           c += parseInt(ch, 10);
         } else {
+          if (!/[pnbrqkPNBRQK]/.test(ch)) throw new Error('Invalid FEN: unknown piece');
+          if (c >= 8) throw new Error('Invalid FEN: rank must contain eight squares');
           var color = ch === ch.toUpperCase() ? 'w' : 'b';
-          this.board[idx(r, c)] = { type: ch.toLowerCase(), color: color };
+          board[idx(r, c)] = { type: ch.toLowerCase(), color: color };
           c++;
         }
+        if (c > 8) throw new Error('Invalid FEN: rank must contain eight squares');
       }
+      if (c !== 8) throw new Error('Invalid FEN: rank must contain eight squares');
     }
 
-    this.turn = (parts[1] === 'b') ? 'b' : 'w';
+    if (parts[1] !== 'w' && parts[1] !== 'b') throw new Error('Invalid FEN: side to move must be w or b');
+    var cast = parts[2];
+    if (!/^(?:-|[KQkq]+)$/.test(cast)) throw new Error('Invalid FEN: bad castling rights');
+    for (var j = 0; j < cast.length; j++) {
+      if (cast.indexOf(cast.charAt(j)) !== j) throw new Error('Invalid FEN: duplicate castling right');
+    }
+    if (parts[3] !== '-' && !/^[a-h][36]$/.test(parts[3])) {
+      throw new Error('Invalid FEN: bad en passant square');
+    }
+    if (parts[3] !== '-' && parts[3].charAt(1) !== (parts[1] === 'w' ? '6' : '3')) {
+      throw new Error('Invalid FEN: en passant rank conflicts with side to move');
+    }
+    if (!/^\d+$/.test(parts[4]) || !Number.isSafeInteger(Number(parts[4]))) {
+      throw new Error('Invalid FEN: halfmove clock must be a nonnegative integer');
+    }
+    if (!/^\d+$/.test(parts[5]) || !Number.isSafeInteger(Number(parts[5])) || Number(parts[5]) < 1) {
+      throw new Error('Invalid FEN: fullmove number must be a positive integer');
+    }
 
-    var cast = parts[2] || '-';
+    this.board = board;
+    this.turn = parts[1];
     this.castling = {
       K: cast.indexOf('K') !== -1,
       Q: cast.indexOf('Q') !== -1,
@@ -100,15 +125,17 @@
       q: cast.indexOf('q') !== -1
     };
 
-    this.ep = (parts[3] && parts[3] !== '-') ? fromAlgebraic(parts[3]) : -1;
-    this.halfmove = parts[4] ? parseInt(parts[4], 10) : 0;
-    this.fullmove = parts[5] ? parseInt(parts[5], 10) : 1;
+    this.ep = parts[3] !== '-' ? fromAlgebraic(parts[3]) : -1;
+    this.halfmove = Number(parts[4]);
+    this.fullmove = Number(parts[5]);
 
     this._undoStack = [];
     this._movesStack = [];
     this.gameMoves = [];
     this._posCounts = {};
     this._keyStack = [];
+    this.startFen = this.fen();
+    this.pgnResult = null;
     var key = this._positionKey();
     this._posCounts[key] = 1;
   };
@@ -636,25 +663,97 @@
     if (out) out += '\n';
     var line = '';
     for (var i = 0; i < this.gameMoves.length; i++) {
-      if (i % 2 === 0) line += (i / 2 + 1) + '. ';
-      line += this.gameMoves[i].san + ' ';
+      var move = this.gameMoves[i];
+      var before = move.fenBefore.split(/\s+/);
+      if (before[1] === 'w') line += before[5] + '. ';
+      else if (i === 0) line += before[5] + '... ';
+      line += move.san + ' ';
     }
     return out + line.trim();
   };
 
-  /** Load a game from PGN movetext (headers are ignored). */
+  /** Load one PGN mainline, honoring an optional starting position and result. */
   P.loadPgn = function (pgn) {
-    this.reset();
-    var text = pgn.replace(/\[[^\]]*\]/g, ' ')        // strip headers
-      .replace(/\{[^}]*\}/g, ' ')                     // strip comments
-      .replace(/\([^)]*\)/g, ' ')                     // strip variations (shallow)
-      .replace(/\d+\.(\.\.)?/g, ' ')                  // strip move numbers
-      .replace(/\b(1-0|0-1|1\/2-1\/2|\*)\b/g, ' ');   // strip results
+    if (typeof pgn !== 'string') throw new Error('Invalid PGN: expected text');
+    var headers = {};
+    var text = pgn;
+
+    // Strip comments and balanced recursive variations without accidentally
+    // replaying an alternative line. Semicolon comments end at the next line.
+    var mainline = '', depth = 0, brace = false, semicolon = false;
+    for (var j = 0; j < text.length; j++) {
+      var ch = text.charAt(j);
+      if (semicolon) {
+        if (ch === '\n' || ch === '\r') { semicolon = false; mainline += ' '; }
+        continue;
+      }
+      if (brace) {
+        if (ch === '}') { brace = false; mainline += ' '; }
+        continue;
+      }
+      if (ch === '[' && !depth) {
+        // Read a tag as a unit: punctuation in quoted header values is not
+        // a comment or variation, and tag-like text inside comments is ignored.
+        var end = j + 1, quoted = false, escaped = false;
+        for (; end < text.length; end++) {
+          var tagCh = text.charAt(end);
+          if (escaped) { escaped = false; continue; }
+          if (tagCh === '\\' && quoted) { escaped = true; continue; }
+          if (tagCh === '"') quoted = !quoted;
+          if (tagCh === ']' && !quoted) break;
+        }
+        if (end === text.length) throw new Error('Invalid PGN: unterminated header');
+        var tag = text.slice(j, end + 1).match(/^\[([A-Za-z0-9_]+)\s+"((?:\\.|[^"\\])*)"\s*\]$/);
+        if (!tag) throw new Error('Invalid PGN: malformed header');
+        if (Object.prototype.hasOwnProperty.call(headers, tag[1])) {
+          throw new Error('Invalid PGN: duplicate header ' + tag[1]);
+        }
+        headers[tag[1]] = tag[2].replace(/\\(["\\])/g, '$1');
+        j = end;
+        mainline += ' ';
+        continue;
+      }
+      if (ch === ';') { semicolon = true; continue; }
+      if (ch === '{') { brace = true; continue; }
+      if (ch === '}') throw new Error('Invalid PGN: unmatched comment delimiter');
+      if (ch === '(') { depth++; mainline += ' '; continue; }
+      if (ch === ')') {
+        if (!depth) throw new Error('Invalid PGN: unmatched variation delimiter');
+        depth--; mainline += ' '; continue;
+      }
+      if (!depth) mainline += ch;
+    }
+    if (brace) throw new Error('Invalid PGN: unterminated comment');
+    if (depth) throw new Error('Invalid PGN: unterminated variation');
+    if (headers.SetUp != null && headers.SetUp !== '0' && headers.SetUp !== '1') {
+      throw new Error('Invalid PGN: SetUp must be 0 or 1');
+    }
+    if (headers.SetUp === '1' && !headers.FEN) throw new Error('Invalid PGN: SetUp requires a FEN header');
+    if (headers.SetUp === '0' && headers.FEN) throw new Error('Invalid PGN: FEN conflicts with SetUp 0');
+    text = mainline.replace(/\$\d+/g, ' ').replace(/\d+\.(?:\.\.)?/g, ' ');
     var tokens = text.split(/\s+/).filter(Boolean);
+    var results = ['1-0', '0-1', '1/2-1/2', '*'];
+    if (headers.Result != null && results.indexOf(headers.Result) < 0) {
+      throw new Error('Invalid PGN: unrecognized Result header');
+    }
+    // Work on a temporary engine so a malformed import keeps the current game.
+    var parsed = new Chess(headers.FEN || START_FEN);
+    var result = null;
     for (var i = 0; i < tokens.length; i++) {
-      var res = this.move(tokens[i]);
+      if (results.indexOf(tokens[i]) >= 0) {
+        if (i !== tokens.length - 1) throw new Error('Invalid PGN: only one game may be imported');
+        result = tokens[i];
+        continue;
+      }
+      var res = parsed.move(tokens[i]);
       if (!res) throw new Error('Illegal or unparsable move in PGN: ' + tokens[i]);
     }
+    if (headers.Result && result && headers.Result !== result) {
+      throw new Error('Invalid PGN: Result header conflicts with movetext');
+    }
+    parsed.pgnResult = result || headers.Result || null;
+    var self = this;
+    Object.keys(parsed).forEach(function (key) { self[key] = parsed[key]; });
     return true;
   };
 

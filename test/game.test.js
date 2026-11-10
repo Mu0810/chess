@@ -144,16 +144,120 @@ test('an empty move list shows a placeholder instead of a blank panel', () => {
 });
 
 test('FEN loading rejects positions that are not playable', () => {
-  const { game } = newGame();
+  const { game, document } = newGame();
   try {
+    game.start({ mode: 'human', baseSeconds: 0 });
+    game._playMove('e4');
+    const before = game.engine.fen();
     game.loadFen('8/8/8/8/8/8/8/8 w - - 0 1');
-    assert.equal(game.engine.gameMoves.length, 0);
-    assert.match(game.el.ioText.value === '' ? 'kings' : 'kings', /kings/);
+    assert.equal(game.engine.fen(), before, 'invalid input preserves the existing position');
+    assert.equal(game.engine.gameMoves.length, 1);
+    assert.match(document.getElementById('toast').textContent, /exactly one king/);
 
     game.loadFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
     assert.equal(game.boardUI.board.filter(Boolean).length, 32);
     assert.equal(boardMatchesDom(game), null);
   } finally { disposeGame(game); }
+});
+
+test('reviewing a position updates captures and evaluation without changing the live game', () => {
+  const { game } = newGame();
+  try {
+    game.start({ mode: 'human', baseSeconds: 0 });
+    const startingWidth = game.el.evalFill.style.width;
+    for (const san of ['e4', 'd5', 'exd5']) game._playMove(san);
+    const live = game.engine.fen();
+    const liveWidth = game.el.evalFill.style.width;
+    assert.notEqual(liveWidth, startingWidth);
+    assert.equal(game.el.capturedBottom.querySelector('.material-adv').textContent, '+1');
+
+    game.navigate(0);
+    assert.equal(game.el.capturedBottom.childElementCount, 0);
+    assert.equal(game.el.capturedTop.childElementCount, 0);
+    assert.equal(game.el.evalFill.style.width, startingWidth);
+    assert.equal(game.el.evalBar.getAttribute('aria-label'), 'Position evaluation: equal');
+    assert.equal(game.engine.fen(), live);
+
+    game.navigate(3);
+    assert.equal(game.el.capturedBottom.querySelector('.material-adv').textContent, '+1');
+    assert.equal(game.el.evalFill.style.width, liveWidth);
+  } finally { disposeGame(game); }
+});
+
+test('imported PGN keeps a custom starting position and black move numbering', () => {
+  const { game } = newGame();
+  try {
+    const fen = '4k3/8/8/8/8/8/4P3/4K3 b - - 0 17';
+    game.loadPgn('[SetUp "1"]\n[FEN "' + fen + '"]\n\n17... Kf7 18. e4 *');
+    assert.equal(game.startFen, fen);
+    assert.equal(game.snapshots[0], fen);
+    assert.equal(game.engine.gameMoves.length, 2);
+    const rows = game.el.moves.children;
+    assert.equal(rows[0].children[0].textContent, '17.');
+    assert.equal(rows[0].children[1].textContent, '');
+    assert.equal(rows[0].children[2].textContent, 'Kf7');
+    assert.equal(rows[1].children[0].textContent, '18.');
+    assert.equal(rows[1].children[1].textContent, 'e4');
+
+    game.navigate(0);
+    assert.equal(game._viewer().fen(), fen);
+    assert.equal(boardMatchesDom(game), null);
+    const exported = game._exportPgn();
+    const replay = new globalThis.Chess();
+    replay.loadPgn(exported);
+    assert.equal(replay.fen(), game.engine.fen());
+  } finally { disposeGame(game); }
+});
+
+test('a declared imported result keeps a resigned or agreed game finished', () => {
+  const { game } = newGame({ withWorker: true });
+  try {
+    game.config.mode = 'ai';
+    game.config.humanColor = 'w';
+    game.loadPgn('[Result "1-0"]\n\n1. e4 1-0');
+    assert.equal(game.active, false);
+    assert.deepEqual(game.result, { over: true, reason: 'imported', winner: 'w' });
+    assert.equal(game.aiThinking, false);
+    assert.equal(game.el.statusPanel.classList.contains('is-over'), true);
+    assert.match(game._exportPgn(), /1-0$/);
+
+    game.loadPgn('1. e4 e5 1/2-1/2');
+    assert.equal(game.active, false);
+    assert.equal(game.result.winner, null);
+  } finally { disposeGame(game); }
+});
+
+test('Download PGN creates a replayable game file', async () => {
+  const { game, document } = newGame();
+  const createElement = document.createElement;
+  const createObjectURL = globalThis.URL.createObjectURL;
+  let downloaded = null;
+  let filename = null;
+  try {
+    game.start({ mode: 'human', baseSeconds: 0 });
+    for (const san of ['e4', 'e5', 'Nf3']) game._playMove(san);
+    const live = game.engine.fen();
+    globalThis.URL.createObjectURL = (blob) => { downloaded = blob; return 'blob:test'; };
+    document.createElement = (tag) => {
+      const el = createElement(tag);
+      if (tag === 'a') el.click = () => { filename = el.download; };
+      return el;
+    };
+    document.getElementById('btn-download-pgn').dispatch('click');
+    assert.match(filename, /^onlinechess-\d{4}-\d{2}-\d{2}\.pgn$/);
+    assert.equal(downloaded.type, 'application/x-chess-pgn;charset=utf-8');
+    const pgn = await downloaded.text();
+    assert.match(pgn.trim(), /\*$/);
+    const replay = new globalThis.Chess();
+    replay.loadPgn(pgn);
+    assert.equal(replay.fen(), live);
+    assert.equal(game.engine.fen(), live);
+    assert.equal(document.body.childElementCount, 0, 'temporary download link is removed');
+  } finally {
+    document.createElement = createElement;
+    globalThis.URL.createObjectURL = createObjectURL;
+    disposeGame(game);
+  }
 });
 
 test('PGN loading replays a whole game', () => {

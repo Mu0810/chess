@@ -128,7 +128,9 @@
           <button class="mini-btn" id="btn-copy-pgn">Copy PGN</button>
           <button class="mini-btn" id="btn-copy-fen">Copy FEN</button>
         </div>
-        <textarea id="io-text" class="io-text" placeholder="Paste FEN or PGN here, then Load"></textarea>
+        <button class="mini-btn io-download" id="btn-download-pgn">Download PGN</button>
+        <label class="sr-only" for="io-text">FEN position or PGN game to import</label>
+        <textarea id="io-text" class="io-text" placeholder="Paste FEN or PGN here, then Load" spellcheck="false"></textarea>
         <div class="io-row">
           <button class="mini-btn" id="btn-load-fen">Load FEN</button>
           <button class="mini-btn" id="btn-load-pgn">Load PGN</button>
@@ -238,7 +240,9 @@
   </div>
 
   <!-- Promotion picker -->
-  <div class="promo-backdrop hidden" id="promo-modal">
+  <div class="promo-backdrop hidden" id="promo-modal" role="dialog" aria-modal="true" aria-labelledby="promo-title" aria-describedby="promo-hint">
+    <h2 id="promo-title" class="sr-only">Promote your pawn</h2>
+    <p id="promo-hint" class="sr-only">Choose a piece with the arrow keys, then press Enter. You can also press Q for queen, R for rook, B for bishop, or N for knight. Press Escape to cancel.</p>
     <div class="promo-box" id="promo-box"></div>
   </div>
 
