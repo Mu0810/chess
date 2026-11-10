@@ -84,6 +84,7 @@
       statusPanel: document.getElementById('status-panel'),
       turnDot: document.getElementById('turn-dot'),
       thinking: document.getElementById('thinking'),
+      evalBar: document.getElementById('eval-bar'),
       evalFill: document.getElementById('eval-fill'),
       boardWrap: document.getElementById('board-wrap'),
       celebration: document.getElementById('celebration'),
@@ -161,6 +162,7 @@
 
     document.getElementById('btn-copy-pgn').addEventListener('click', function () { self.copyPgn(); });
     document.getElementById('btn-copy-fen').addEventListener('click', function () { self.copyFen(); });
+    document.getElementById('btn-download-pgn').addEventListener('click', function () { self.downloadPgn(); });
     document.getElementById('btn-load-fen').addEventListener('click', function () { self.loadFen(self.el.ioText.value); });
     document.getElementById('btn-load-pgn').addEventListener('click', function () { self.loadPgn(self.el.ioText.value); });
 
@@ -385,12 +387,20 @@
       this._validatePosition(c);
       this._cancelAI();
       this.engine = c;
-      this.startFen = Chess.START_FEN;
-      this.snapshots = [Chess.START_FEN];
+      this.startFen = c.startFen;
+      this.snapshots = [this.startFen];
       for (var i = 0; i < c.gameMoves.length; i++) this.snapshots.push(c.gameMoves[i].fenAfter);
       this.viewIndex = c.gameMoves.length;
       this.active = !c.isGameOver();
       this.result = this.active ? null : c.status();
+      if (this.active && c.pgnResult && c.pgnResult !== '*') {
+        this.result = {
+          over: true,
+          reason: 'imported',
+          winner: c.pgnResult === '1-0' ? 'w' : c.pgnResult === '0-1' ? 'b' : null
+        };
+        this.active = false;
+      }
       this._resetLoadedClocks();
       this._renderAll();
       this._scheduleSave();
@@ -680,7 +690,9 @@
     this.viewIndex = Math.max(0, Math.min(max, index));
     this._renderBoard();
     this._renderMoveList();
+    this._renderCaptured();
     this._renderStatus();
+    this._renderEvalBar();
     this._updateBoardEnabled();
     this._scheduleSave();
   };
@@ -853,11 +865,35 @@
     return '1/2-1/2';
   };
 
-  G.copyPgn = function () {
+  G._exportPgn = function () {
     var pgn = this.engine.pgn(this._pgnHeaders());
-    if (this.result) pgn += (pgn ? ' ' : '') + this._resultToken();
+    return pgn + (pgn && !/\s$/.test(pgn) ? ' ' : '') + this._resultToken();
+  };
+
+  G.copyPgn = function () {
+    var pgn = this._exportPgn();
     this.el.ioText.value = pgn;
     this._copyText(pgn, 'PGN copied.');
+  };
+
+  G.downloadPgn = function () {
+    var url, link;
+    try {
+      var pgn = this._exportPgn();
+      var blob = new global.Blob([pgn + '\n'], { type: 'application/x-chess-pgn;charset=utf-8' });
+      url = global.URL.createObjectURL(blob);
+      link = document.createElement('a');
+      link.href = url;
+      link.download = 'onlinechess-' + this._pgnHeaders().Date.replace(/\./g, '-') + '.pgn';
+      document.body.appendChild(link);
+      link.click();
+      this.toast('PGN downloaded.');
+    } catch (err) {
+      this.toast('Could not download PGN. Use Copy PGN instead.', true);
+    } finally {
+      if (link) link.remove();
+      if (url) global.setTimeout(function () { global.URL.revokeObjectURL(url); }, 1000);
+    }
   };
 
   G.copyFen = function () {
@@ -906,6 +942,9 @@
     var pawns = this.ai.evaluate(this._viewer()) / 100;
     var share = 50 + 50 * (2 / (1 + Math.exp(-pawns / 3.2)) - 1);
     this.el.evalFill.style.width = Math.max(3, Math.min(97, share)).toFixed(1) + '%';
+    var description = Math.abs(pawns) < 0.05 ? 'equal'
+      : (pawns > 0 ? 'White' : 'Black') + ' advantage, ' + Math.abs(pawns).toFixed(1) + ' pawns';
+    if (this.el.evalBar) this.el.evalBar.setAttribute('aria-label', 'Position evaluation: ' + description);
   };
 
   G._renderBoard = function () {
@@ -944,13 +983,16 @@
       return;
     }
 
-    for (var i = 0; i < moves.length; i += 2) {
+    var start = this.startFen.split(/\s+/);
+    var offset = start[1] === 'b' ? 1 : 0;
+    var firstNumber = +start[5];
+    for (var i = -offset; i < moves.length; i += 2) {
       var tr = document.createElement('tr');
       var num = document.createElement('td');
       num.className = 'move-num';
-      num.textContent = (i / 2 + 1) + '.';
+      num.textContent = (firstNumber + (i + offset) / 2) + '.';
       tr.appendChild(num);
-      tr.appendChild(this._moveCell(moves[i], i + 1));
+      tr.appendChild(i >= 0 ? this._moveCell(moves[i], i + 1) : document.createElement('td'));
       tr.appendChild(moves[i + 1] ? this._moveCell(moves[i + 1], i + 2) : document.createElement('td'));
       this.el.moves.appendChild(tr);
     }
@@ -1008,6 +1050,7 @@
   };
 
   G._renderStatus = function () {
+    this._renderStatusIndicators();
     if (!this._atLatest()) {
       if (this.viewIndex === 0) this.el.status.textContent = 'Starting position · Reviewing';
       else this.el.status.textContent = 'After ' + this.engine.gameMoves[this.viewIndex - 1].san + ' · Reviewing';
@@ -1026,7 +1069,6 @@
       var color = this.engine.turn === 'w' ? 'White' : 'Black';
       this.el.status.textContent = (this.engine.inCheck() ? 'Check — ' : '') + color + ' to move';
     }
-    this._renderStatusIndicators();
     var ev = this.ai.evaluate(this.engine) / 100;
     var evText = Math.abs(ev) < 0.05 ? 'Position is equal' : (ev > 0 ? 'White +' : 'Black +') + Math.abs(ev).toFixed(1);
     if (this.aiThinking && this.ai.nodes) evText += ' · ' + this.ai.nodes.toLocaleString() + ' nodes';
@@ -1054,7 +1096,7 @@
     var labels = {
       checkmate: 'Checkmate', timeout: 'Time out', resignation: 'Resignation',
       stalemate: 'Stalemate', 'fifty-move': '50-move rule', threefold: 'Threefold repetition',
-      insufficient: 'Insufficient material', agreement: 'Draw by agreement'
+      insufficient: 'Insufficient material', agreement: 'Draw by agreement', imported: 'Imported result'
     };
     return labels[reason] || 'Game over';
   };
@@ -1078,7 +1120,7 @@
 
   G._renderCaptured = function () {
     var takenBy = { w: [], b: [] };
-    for (var i = 0; i < this.engine.gameMoves.length; i++) {
+    for (var i = 0; i < this.viewIndex; i++) {
       var m = this.engine.gameMoves[i];
       if (m.capture) takenBy[m.color].push(m.capture);
     }

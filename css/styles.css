@@ -786,6 +786,7 @@ body.hide-hints .sq.legal::after, body.hide-hints .sq.legal-cap::after { display
 }
 .mini-btn:hover { background: var(--panel-hover); border-color: var(--line-strong); transform: translateY(-1px); }
 .mini-btn:active { transform: scale(0.97); }
+.io-download { width: 100%; margin-top: 8px; }
 .io-text {
   display: block;
   width: 100%;

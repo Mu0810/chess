@@ -322,6 +322,9 @@
   // ---- Public API ----------------------------------------------------------
 
   B.setPosition = function (state) {
+    // A pending choice belongs to the position that opened it. Navigation,
+    // imports, and a new game must not leave an old move waiting to fire.
+    if (this._promotionCancel) this._promotionCancel();
     var previous = this.board;
     this.board = state.board.slice();
     if (state.lastMove !== undefined) this.lastMove = state.lastMove;
@@ -441,6 +444,7 @@
   };
 
   B._onKeyDown = function (e) {
+    if (this._promotionCancel) return;
     var steps = {
       ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1]
     };
@@ -526,7 +530,7 @@
   };
 
   B._onDown = function (e) {
-    if (!this.enabled) return;
+    if (!this.enabled || this._promotionCancel) return;
     var idx = this._idxFromPoint(e.clientX, e.clientY);
     if (idx == null) return;
     e.preventDefault();
@@ -598,34 +602,78 @@
   // ---- Promotion picker ----------------------------------------------------
 
   B.showPromotion = function (color, cb) {
+    if (this._promotionCancel) this._promotionCancel();
+    var self = this;
     var modal = document.getElementById('promo-modal');
     var box = document.getElementById('promo-box');
     box.innerHTML = '';
     var types = ['q', 'r', 'b', 'n'];
+    var options = [];
     var settled = false;
     function finish(type) {
       if (settled) return;
       settled = true;
+      self._promotionCancel = null;
       modal.classList.add('hidden');
-      box.onclick = null;
-      backdropHandler && modal.removeEventListener('pointerdown', backdropHandler);
+      modal.removeEventListener('pointerdown', onBackdrop);
+      modal.removeEventListener('keydown', onKey);
       cb(type);
+      self.squaresEl.focus();
+    }
+    function onBackdrop(ev) {
+      if (ev.target === modal) finish(null);
+    }
+    function onKey(ev) {
+      // Global shortcuts (notably N for a new game) must not run behind the
+      // picker. Modified keys retain their normal browser behaviour.
+      ev.stopPropagation();
+      if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+
+      var idx = options.indexOf(document.activeElement);
+      if (idx < 0) idx = 0;
+      var step = 0;
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        finish(null);
+      } else if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
+        ev.preventDefault();
+        finish(types[idx]);
+      } else if (ev.key === 'Tab' || ev.key.indexOf('Arrow') === 0) {
+        ev.preventDefault();
+        step = ev.key === 'ArrowLeft' || ev.key === 'ArrowUp' || (ev.key === 'Tab' && ev.shiftKey) ? -1 : 1;
+        options[(idx + step + options.length) % options.length].focus();
+      } else if (ev.key === 'Home' || ev.key === 'End') {
+        ev.preventDefault();
+        options[ev.key === 'Home' ? 0 : options.length - 1].focus();
+      } else {
+        var type = ev.key.toLowerCase();
+        if (types.indexOf(type) >= 0) {
+          ev.preventDefault();
+          finish(type);
+        }
+      }
     }
     for (var i = 0; i < types.length; i++) {
-      (function (t) {
+      (function (t, index) {
         var opt = document.createElement('button');
+        opt.type = 'button';
         opt.className = 'promo-opt ' + (color === 'w' ? 'white' : 'black');
-        opt.style.animationDelay = (i * 55) + 'ms';
-        opt.appendChild(Pieces.glyphSpan(t, color));
+        opt.style.animationDelay = (index * 55) + 'ms';
+        opt.setAttribute('aria-label', 'Promote to ' + Pieces.NAME[t]);
+        opt.title = 'Promote to ' + Pieces.NAME[t] + ' (' + t.toUpperCase() + ')';
+        var glyph = Pieces.glyphSpan(t, color);
+        glyph.setAttribute('aria-hidden', 'true');
+        opt.appendChild(glyph);
         opt.addEventListener('click', function () { finish(t); });
+        options.push(opt);
         box.appendChild(opt);
-      })(types[i]);
+      })(types[i], i);
     }
-    var backdropHandler = function (ev) {
-      if (ev.target === modal) finish(null);
-    };
-    modal.addEventListener('pointerdown', backdropHandler);
+    this._promotionCancel = function () { finish(null); };
+    modal.addEventListener('pointerdown', onBackdrop);
+    modal.addEventListener('keydown', onKey);
     modal.classList.remove('hidden');
+    options[0].focus();
   };
 
   global.BoardUI = BoardUI;

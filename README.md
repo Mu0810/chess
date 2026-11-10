@@ -16,13 +16,15 @@ Rajasthan, India.
 
 **Clocks** — bullet, blitz, and rapid presets with increment support, plus an unlimited mode.
 
-**Board** — drag and drop or tap to move, legal-move hints, last-move and check highlights, coordinates, and board flip.
+**Board** — drag and drop, tap, or use the keyboard to move, with legal-move hints, last-move and check highlights, coordinates, and board flip. Pawn promotion supports named, keyboard-focusable choices.
 
-**Review** — move history in algebraic notation, clickable to jump to any position, with arrow-key navigation and takeback.
+**Review** — move history in algebraic notation, clickable to jump to any position, with arrow-key navigation and takeback. Captured pieces and the evaluation bar follow the position being reviewed.
 
 **Analysis** — live evaluation bar, captured pieces, and material advantage.
 
-**Import and export** — copy or load PGN and FEN.
+**Import and export** — copy or load PGN and FEN, or download a game as a `.pgn` file. PGN imports support custom starting positions, game results, comments, annotations, and nested variations. Invalid imports preserve the current game.
+
+**Resume** — games and settings are saved locally in the browser. A restored game's clock stays stopped until the next move.
 
 **Presentation** — four board themes, synthesized sound effects, and a responsive layout. Respects `prefers-reduced-motion`, includes a skip link and visible focus states.
 
@@ -39,6 +41,28 @@ npm start          # serves on http://localhost:3000, or $PORT
 ```
 
 Requires Node.js 24 or newer. There are no runtime dependencies.
+
+## Keyboard controls
+
+Focus the board, then use the arrow keys to choose a square. Press Enter or Space
+to select a piece and again to move it; Escape cancels the selection. Arrow keys
+follow the board's orientation. When promoting a pawn, use the arrow keys or Tab
+to choose a piece and Enter to confirm, or press Q, R, B, or N directly. Escape
+cancels promotion and returns focus to the board.
+
+Outside the board, Left and Right review move history, F flips the board, and N
+opens a new game. These shortcuts pause while the promotion picker is open.
+
+## Importing and saving games
+
+Paste a complete, six-field FEN position or a single game's PGN into the import
+box, then choose the matching Load button. PGN `SetUp` and `FEN` headers preserve
+custom starting positions, including games that start with Black to move. A
+declared PGN result keeps a finished game closed to further moves.
+
+Copy PGN and Download PGN export the whole game, including its starting position
+and result. Copy FEN exports the position currently shown on the board, including
+an earlier position selected during review.
 
 ## Site structure
 
@@ -70,6 +94,7 @@ terms.html        terms of service
 css/styles.css    design tokens, layout, and motion
 js/engine.js      rules engine: move generation, SAN, FEN, PGN
 js/ai.js          negamax search with alpha-beta and quiescence
+js/worker.js      computer search off the main thread when workers are available
 js/ui.js          board rendering and pointer input
 js/game.js        controller: clocks, history, actions
 js/main.js        settings, dialogs, keyboard shortcuts
@@ -99,6 +124,16 @@ All match the published counts. To check yourself:
 ```bash
 node -e 'require("./js/engine.js"); console.log(new Chess().perft(4))'   # 197281
 ```
+
+Run the regression suite and JavaScript syntax checks with:
+
+```bash
+npm test
+npm run check
+```
+
+The suite covers rules, computer play, rendering, keyboard controls, game
+restoration, imports and exports, and server behaviour.
 
 ## Deploying
 

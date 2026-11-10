@@ -33,6 +33,7 @@
   var newGameModal = byId('newgame-modal');
   var settingsModal = byId('settings-modal');
   var confirmModal = byId('confirm-modal');
+  var promotionModal = byId('promo-modal');
   var game = new Game();
   globalThis.onlinechess = game;
 
@@ -114,6 +115,7 @@
 
     // The confirmation dialog owns its own keys (Enter / Escape).
     if (confirmModal && !confirmModal.classList.contains('hidden')) return;
+    if (promotionModal && !promotionModal.classList.contains('hidden')) return;
 
     if (ev.key === 'Escape') {
       closeModal(newGameModal);
